@@ -85,6 +85,16 @@ impl TransactionV1 {
         }
         Ok(())
     }
+
+    pub fn is_coinbase(&self) -> bool {
+        self.inputs.len() == 1
+            && self
+                .inputs
+                .first()
+                .expect("Transaction must have at least one input")
+                .outpoint()
+                .is_coinbase()
+    }
 }
 
 impl Idable for TransactionV1 {

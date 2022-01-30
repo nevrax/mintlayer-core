@@ -16,7 +16,8 @@
 // Author(s): S. Afach
 
 use crate::primitives::{Id, Idable};
-use serialization::{DirectDecode, DirectEncode, Encode};
+use parity_scale_codec::Encode;
+use serialization::{DirectDecode, DirectEncode};
 use thiserror::Error;
 
 use crate::chain::transaction::transaction_v1::TransactionV1;

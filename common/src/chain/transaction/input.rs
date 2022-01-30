@@ -99,6 +99,8 @@ impl Ord for OutPoint {
 }
 
 impl OutPoint {
+    pub const COINBASE_OUTPOINT_INDEX: u32 = u32::MAX;
+
     pub fn new(outpoint_source_id: OutPointSourceId, output_index: u32) -> Self {
         OutPoint {
             id: outpoint_source_id,
@@ -112,6 +114,10 @@ impl OutPoint {
 
     pub fn output_index(&self) -> u32 {
         self.index
+    }
+
+    pub fn is_coinbase(&self) -> bool {
+        matches!(self.id, OutPointSourceId::BlockReward(..))
     }
 }
 
