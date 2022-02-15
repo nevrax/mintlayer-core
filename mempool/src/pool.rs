@@ -234,6 +234,8 @@ pub enum TxValidationError {
     ConflictWithIrreplaceableTransaction,
     #[error("TransactionFeeOverflow")]
     TransactionFeeOverflow,
+    #[error("ReplacementFeeLowerThanOriginal")]
+    ReplacementFeeLowerThanOriginal,
 }
 
 impl From<TxValidationError> for MempoolError {
@@ -320,11 +322,26 @@ impl<C: ChainState + Debug> MempoolImpl<C> {
                 .is_replaceable()
                 .then(|| ())
                 .ok_or(TxValidationError::ConflictWithIrreplaceableTransaction)?;
+
+            self.pays_more_than_conflicts(tx, &conflicts)?;
         }
 
         self.verify_inputs_available(tx)?;
 
         Ok(())
+    }
+
+    fn pays_more_than_conflicts(
+        &self,
+        tx: &Transaction,
+        conflicts: &[Rc<TxMempoolEntry>],
+    ) -> Result<(), TxValidationError> {
+        let replacement_fee = self.try_get_fee(tx)?;
+        conflicts
+            .iter()
+            .all(|conflict| conflict.fee < replacement_fee)
+            .then(|| ())
+            .ok_or(TxValidationError::ReplacementFeeLowerThanOriginal)
     }
 }
 
