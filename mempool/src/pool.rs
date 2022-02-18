@@ -358,6 +358,13 @@ impl<C: ChainState + Debug> MempoolImpl<C> {
             return Err(TxValidationError::TransactionAlreadyInMempool);
         }
 
+        self.rbf_checks(tx)?;
+        self.verify_inputs_available(tx)?;
+
+        Ok(())
+    }
+
+    fn rbf_checks(&self, tx: &Transaction) -> Result<(), TxValidationError> {
         let conflicts = tx
             .inputs()
             .iter()
@@ -373,10 +380,8 @@ impl<C: ChainState + Debug> MempoolImpl<C> {
 
             self.pays_more_than_conflicts(tx, &conflicts)?;
             self.potential_replacements_within_limit(&conflicts)?;
+            // TODO no new unconfirmed
         }
-
-        self.verify_inputs_available(tx)?;
-
         Ok(())
     }
 
@@ -1385,10 +1390,11 @@ mod tests {
         let mut mempool = setup();
         let num_potential_replacements = MAX_BIP125_REPLACEMENT_CANDIDATES + 1;
         let err = test_bip125_max_replacements(&mut mempool, num_potential_replacements)
-            .expect_err("too many replacements");
-        let real_err = anyhow::Error::downcast::<MempoolError>(err).expect("failed to downcast");
+            .expect_err("expected error TooManyPotentialReplacements")
+            .downcast()
+            .expect("failed to downcast");
         assert!(matches!(
-            real_err,
+            err,
             MempoolError::TxValidationError(TxValidationError::TooManyPotentialReplacements)
         ));
         Ok(())
