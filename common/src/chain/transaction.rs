@@ -90,6 +90,12 @@ impl Transaction {
         }
     }
 
+    pub fn is_coinbase(&self) -> bool {
+        match &self {
+            Transaction::V1(tx) => tx.is_coinbase(),
+        }
+    }
+
     pub fn flags(&self) -> u32 {
         match &self {
             Transaction::V1(tx) => tx.flags(),

@@ -17,6 +17,7 @@ members = [
   "chainstate",    # code on chainstate of blocks and transactions
   "script",        # bitcoin script and its interfaces
   "logging",       # logging engine and its interfaces
+  "mempool",       # mempool interface and implementation
   "p2p",           # p2p communication interfaces and protocols
   "rpc",           # rpc abstraction and implementation
   "serialization", # full featured serialization interfaces and implementations
@@ -38,6 +39,7 @@ default-members = [
   "chainstate",
   "script",
   "logging",
+  "mempool",
   "p2p",
   "rpc",
   "serialization",
@@ -58,6 +60,7 @@ chainstate = { path = "chainstate"}
 chainstate-types = { path = "chainstate-types"}
 script = { path = "script"}
 logging = { path = "logging"}
+mempool = { path = "mempool"}
 p2p = { path = "p2p"}
 rpc = { path = "rpc"}
 serialization = { path = "serialization"}
