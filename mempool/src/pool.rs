@@ -770,18 +770,9 @@ mod tests {
     }
 
     impl TxGenerator {
-        fn new(
-            mempool: &MempoolImpl<ChainStateMock>,
-            num_inputs: usize,
-            num_outputs: usize,
-        ) -> Self {
+        fn new(mempool: &MempoolImpl<ChainStateMock>) -> Self {
             let unconfirmed_outputs = BTreeSet::new();
-            Self::create_tx_generator(
-                &mempool.chain_state,
-                &unconfirmed_outputs,
-                num_inputs,
-                num_outputs,
-            )
+            Self::create_tx_generator(&mempool.chain_state, &unconfirmed_outputs)
         }
 
         fn with_fee(mut self, fee: Amount) -> Self {
@@ -789,25 +780,24 @@ mod tests {
             self
         }
 
-        fn new_with_unconfirmed(
-            mempool: &MempoolImpl<ChainStateMock>,
-            num_inputs: usize,
-            num_outputs: usize,
-        ) -> Self {
+        fn with_num_inputs(mut self, num_inputs: usize) -> Self {
+            self.num_inputs = num_inputs;
+            self
+        }
+
+        fn with_num_outputs(mut self, num_outputs: usize) -> Self {
+            self.num_outputs = num_outputs;
+            self
+        }
+
+        fn new_with_unconfirmed(mempool: &MempoolImpl<ChainStateMock>) -> Self {
             let unconfirmed_outputs = mempool.available_outpoints();
-            Self::create_tx_generator(
-                &mempool.chain_state,
-                &unconfirmed_outputs,
-                num_inputs,
-                num_outputs,
-            )
+            Self::create_tx_generator(&mempool.chain_state, &unconfirmed_outputs)
         }
 
         fn create_tx_generator(
             chain_state: &ChainStateMock,
             unconfirmed_outputs: &BTreeSet<ValuedOutPoint>,
-            num_inputs: usize,
-            num_outputs: usize,
         ) -> Self {
             let coin_pool = chain_state
                 .unspent_outpoints()
@@ -818,8 +808,8 @@ mod tests {
 
             Self {
                 coin_pool,
-                num_inputs,
-                num_outputs,
+                num_inputs: 1,
+                num_outputs: 1,
                 tx_fee: Amount::from_atoms(0),
             }
         }
@@ -977,10 +967,8 @@ mod tests {
     #[test]
     fn txs_sorted() -> anyhow::Result<()> {
         let chain_state = ChainStateMock::new();
-        let num_inputs = 1;
-        let num_outputs = 1;
         let mut mempool = MempoolImpl::create(chain_state);
-        let mut tx_generator = TxGenerator::new(&mempool, num_inputs, num_outputs);
+        let mut tx_generator = TxGenerator::new(&mempool);
         let target_txs = 100;
 
         for _ in 0..target_txs {
@@ -1006,9 +994,8 @@ mod tests {
     #[test]
     fn tx_no_inputs() -> anyhow::Result<()> {
         let mut mempool = setup();
-        let num_inputs = 0;
-        let num_outputs = 1;
-        let tx = TxGenerator::new(&mempool, num_inputs, num_outputs)
+        let tx = TxGenerator::new(&mempool)
+            .with_num_inputs(0)
             .generate_tx()
             .expect("generate_tx failed");
         assert!(matches!(
@@ -1025,9 +1012,8 @@ mod tests {
     #[test]
     fn tx_no_outputs() -> anyhow::Result<()> {
         let mut mempool = setup();
-        let num_inputs = 1;
-        let num_outputs = 0;
-        let tx = TxGenerator::new(&mempool, num_inputs, num_outputs)
+        let tx = TxGenerator::new(&mempool)
+            .with_num_outputs(0)
             .generate_tx()
             .expect("generate_tx failed");
         assert!(matches!(
@@ -1197,9 +1183,8 @@ mod tests {
     #[test]
     fn tx_too_big() -> anyhow::Result<()> {
         let mut mempool = setup();
-        let num_inputs = 1;
-        let num_outputs = 400_000;
-        let tx = TxGenerator::new(&mempool, num_inputs, num_outputs)
+        let tx = TxGenerator::new(&mempool)
+            .with_num_outputs(400_000)
             .generate_tx()
             .expect("generate_tx failed");
         assert!(matches!(
@@ -1213,15 +1198,13 @@ mod tests {
 
     fn test_replace_tx(original_fee: Amount, replacement_fee: Amount) -> Result<(), MempoolError> {
         let mut mempool = setup();
-        let num_inputs = 1;
-        let num_outputs = 1;
-        let tx = TxGenerator::new(&mempool, num_inputs, num_outputs)
+        let tx = TxGenerator::new(&mempool)
             .with_fee(original_fee)
             .generate_replaceable_tx()
             .expect("generate_replaceable_tx");
         mempool.add_transaction(tx)?;
 
-        let tx = TxGenerator::new(&mempool, num_inputs, num_outputs)
+        let tx = TxGenerator::new(&mempool)
             .with_fee(replacement_fee)
             .generate_tx()
             .expect("generate_tx_failed");
@@ -1261,9 +1244,7 @@ mod tests {
     #[test]
     fn tx_replace_child() -> anyhow::Result<()> {
         let mut mempool = setup();
-        let num_inputs = 1;
-        let num_outputs = 1;
-        let tx = TxGenerator::new_with_unconfirmed(&mempool, num_inputs, num_outputs)
+        let tx = TxGenerator::new_with_unconfirmed(&mempool)
             .generate_replaceable_tx()
             .expect("generate_replaceable_tx");
         mempool.add_transaction(tx.clone())?;
@@ -1348,9 +1329,8 @@ mod tests {
     #[test]
     fn one_ancestor_signal_is_enough() -> anyhow::Result<()> {
         let mut mempool = setup();
-        let num_inputs = 1;
-        let num_outputs = 2;
-        let tx = TxGenerator::new_with_unconfirmed(&mempool, num_inputs, num_outputs)
+        let tx = TxGenerator::new_with_unconfirmed(&mempool)
+            .with_num_outputs(2)
             .generate_tx()
             .expect("generate_replaceable_tx");
 
@@ -1493,9 +1473,8 @@ mod tests {
         mempool: &mut MempoolImpl<ChainStateMock>,
         num_potential_replacements: usize,
     ) -> anyhow::Result<()> {
-        let num_inputs = 1;
-        let num_outputs = num_potential_replacements - 1;
-        let tx = TxGenerator::new(mempool, num_inputs, num_outputs)
+        let tx = TxGenerator::new(mempool)
+            .with_num_outputs(num_potential_replacements - 1)
             .generate_replaceable_tx()
             .expect("generate_tx failed");
         let input = tx.get_inputs().first().expect("one input").to_owned();
@@ -1547,9 +1526,8 @@ mod tests {
     #[test]
     fn spends_new_unconfirmed() -> anyhow::Result<()> {
         let mut mempool = setup();
-        let num_inputs = 1;
-        let num_outputs = 2;
-        let tx = TxGenerator::new(&mempool, num_inputs, num_outputs)
+        let tx = TxGenerator::new(&mempool)
+            .with_num_outputs(2)
             .generate_replaceable_tx()
             .expect("generate_replaceable_tx");
         let outpoint_source_id = OutPointSourceId::Transaction(tx.get_id());
@@ -1585,9 +1563,7 @@ mod tests {
     #[test]
     fn pays_more_than_conflicts_with_descendants() -> anyhow::Result<()> {
         let mut mempool = setup();
-        let num_inputs = 1;
-        let num_outputs = 1;
-        let tx = TxGenerator::new(&mempool, num_inputs, num_outputs)
+        let tx = TxGenerator::new(&mempool)
             .generate_replaceable_tx()
             .expect("generate_replaceable_tx");
         let tx_id = tx.get_id();
