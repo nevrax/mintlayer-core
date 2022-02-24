@@ -142,15 +142,24 @@ impl TxMempoolEntry {
     fn unconfirmed_descendants(&self, store: &MempoolStore) -> BTreeSet<H256> {
         let mut visited = BTreeSet::new();
         self.unconfirmed_descendants_inner(&mut visited, store);
+        eprintln!(
+            "found {} unconfirmed descendants:\n {:?}",
+            visited.len(),
+            visited
+        );
         visited
     }
 
     fn unconfirmed_descendants_inner(&self, visited: &mut BTreeSet<H256>, store: &MempoolStore) {
+        eprintln!("unconfirmed_descendants_inner");
         for child in self.children.iter() {
+            eprintln!("iterating: child: {:?}", child);
             if visited.contains(child) {
+                eprintln!("child already visited");
                 continue;
             } else {
-                visited.insert(child.to_owned());
+                visited.insert(*child);
+                eprintln!("new child added");
                 store
                     .get_entry(child)
                     .expect("entry")
@@ -252,7 +261,9 @@ impl MempoolStore {
         self.mark_outpoints_as_spent(&entry);
 
         self.txs_by_fee.entry(entry.fee).or_default().insert(entry.tx_id());
+        let tx_id = entry.tx_id();
         self.txs_by_id.insert(entry.tx_id(), entry);
+        assert!(self.txs_by_id.get(&tx_id).is_some());
 
         Ok(())
     }
@@ -305,7 +316,7 @@ pub enum TxValidationError {
     ConflictWithIrreplaceableTransaction,
     #[error("TransactionFeeOverflow")]
     TransactionFeeOverflow,
-    #[error("ReplacementFeeLowerThanOriginal")]
+    #[error("ReplacementFeeLowerThanOriginal: The replacement transaction has fee {replacement_fee:?}, the original transaction has fee {original_fee:?}")]
     ReplacementFeeLowerThanOriginal {
         replacement_tx: H256,
         replacement_fee: Amount,
@@ -324,6 +335,8 @@ pub enum TxValidationError {
     AdditionalFeesUnderflow,
     #[error("InsufficientFeesToRelay")]
     InsufficientFeesToRelay,
+    #[error("InsufficientFeesToRelayRBF")]
+    InsufficientFeesToRelayRBF,
 }
 
 impl From<TxValidationError> for Error {
@@ -465,9 +478,13 @@ impl<C: ChainState> MempoolImpl<C> {
             .ok_or(TxValidationError::AdditionalFeesUnderflow)?;
         // TODO should we return an error here instead of expect?
         let relay_fee = get_relay_fee(tx);
+        eprintln!(
+            "relay_fee: {:?}, additional_fees {:?}, total_conflict_fees {:?}, replacement_fee: {:?}",
+            relay_fee, additional_fees, total_conflict_fees, self.try_get_fee(tx)?
+        );
         (additional_fees >= relay_fee)
             .then(|| ())
-            .ok_or(TxValidationError::InsufficientFeesToRelay)
+            .ok_or(TxValidationError::InsufficientFeesToRelayRBF)
     }
 
     fn pays_more_than_conflicts_with_descendants(
@@ -498,16 +515,16 @@ impl<C: ChainState> MempoolImpl<C> {
     ) -> Result<(), TxValidationError> {
         let outpoints_spent_by_conflicts = conflicts
             .iter()
-            .flat_map(|conflict| conflict.tx.get_inputs().iter().map(|input| input.get_outpoint()))
+            .flat_map(|conflict| conflict.tx.inputs().iter().map(|input| input.outpoint()))
             .collect::<BTreeSet<_>>();
 
-        tx.get_inputs()
+        tx.inputs()
             .iter()
             .find(|input| {
                 // input spends an unconfirmed output
                 input.spends_unconfirmed(self) &&
                 // this unconfirmed output is not spent by one of the conflicts
-                !outpoints_spent_by_conflicts.contains(&input.get_outpoint())
+                !outpoints_spent_by_conflicts.contains(&input.outpoint())
             })
             .map_or(Ok(()), |_| {
                 Err(TxValidationError::SpendsNewUnconfirmedOutput)
@@ -560,9 +577,7 @@ trait SpendsUnconfirmed<C: ChainState> {
 
 impl<C: ChainState> SpendsUnconfirmed<C> for TxInput {
     fn spends_unconfirmed(&self, mempool: &MempoolImpl<C>) -> bool {
-        mempool.contains_transaction(
-            self.get_outpoint().get_tx_id().get_tx_id().expect("Not coinbase"),
-        )
+        mempool.contains_transaction(self.outpoint().tx_id().get_tx_id().expect("Not coinbase"))
     }
 }
 
@@ -635,6 +650,40 @@ mod tests {
     struct ValuedOutPoint {
         outpoint: OutPoint,
         value: Amount,
+    }
+    fn dummy_input() -> TxInput {
+        let outpoint_source_id = OutPointSourceId::Transaction(Id::new(H256::zero()));
+        let output_index = 0;
+        let witness = DUMMY_WITNESS_MSG.to_vec();
+        TxInput::new(
+            outpoint_source_id,
+            output_index,
+            InputWitness::NoSignature(Some(witness)),
+        )
+    }
+
+    fn dummy_output() -> TxOutput {
+        let value = Amount::from_atoms(0);
+        let purpose = OutputPurpose::Transfer(Destination::AnyoneCanSpend);
+        TxOutput::new(value, purpose)
+    }
+
+    fn estimate_tx_size(num_inputs: usize, num_outputs: usize) -> usize {
+        let inputs = (0..num_inputs).into_iter().map(|_| dummy_input()).collect();
+        let outputs = (0..num_outputs).into_iter().map(|_| dummy_output()).collect();
+        let flags = 0;
+        let locktime = 0;
+        let size = Transaction::new(flags, inputs, outputs, locktime).unwrap().encoded_size();
+        // Take twice the encoded size of the dummy tx.Real Txs are larger than these dummy ones,
+        // but taking 2 times the size seems to work
+        2 * size
+    }
+
+    #[test]
+    fn dummy_size() {
+        eprintln!("1, 1: {}", estimate_tx_size(1, 1));
+        eprintln!("1, 2: {}", estimate_tx_size(1, 2));
+        eprintln!("1, 400: {}", estimate_tx_size(1, 400));
     }
 
     fn valued_outpoint(
@@ -810,6 +859,14 @@ mod tests {
             self
         }
 
+        // TODO not sure if we need this
+        /*
+        fn with_fee(mut self, tx_fee: Amount) -> Self {
+            self.tx_fee = tx_fee;
+            self
+        }
+        */
+
         fn new(mempool: &MempoolImpl<ChainStateMock>) -> Self {
             let unconfirmed_outputs = mempool.available_outpoints();
             Self::create_tx_generator(&mempool.chain_state, &unconfirmed_outputs)
@@ -836,6 +893,10 @@ mod tests {
         }
 
         fn generate_tx(&mut self) -> anyhow::Result<Transaction> {
+            self.tx_fee = Amount::from_atoms(get_relay_fee_from_tx_size(estimate_tx_size(
+                self.num_inputs,
+                self.num_outputs,
+            )));
             let valued_inputs = self.generate_tx_inputs();
             let outputs = self.generate_tx_outputs(&valued_inputs)?;
             let locktime = 0;
@@ -880,12 +941,16 @@ mod tests {
             let sum_of_inputs =
                 values.into_iter().sum::<Option<_>>().expect("Overflow in sum of input values");
 
-            let total_to_spend = (sum_of_inputs - self.tx_fee).expect("underflow");
+            let total_to_spend = (sum_of_inputs - self.tx_fee)
+                .expect("generate_tx_outputs: underflow computing total_to_spend");
 
             let mut left_to_spend = total_to_spend;
             let mut outputs = Vec::new();
 
             let max_output_value = Amount::from_atoms(1_000);
+            // We want every output to be spendable in a single-input, single-output transaction
+            // So it has to larger in value than the relay fee for such a transaction
+            let min_output_value = Amount::from_atoms(100);
             for _ in 0..self.num_outputs - 1 {
                 let max_output_value = std::cmp::min(
                     (left_to_spend / 2).expect("division failed"),
@@ -894,7 +959,7 @@ mod tests {
                 if max_output_value == Amount::from_atoms(0) {
                     return Err(anyhow::Error::msg("No more funds to spend"));
                 }
-                let value = Amount::random(Amount::from_atoms(1)..=max_output_value);
+                let value = Amount::random(min_output_value..=max_output_value);
                 outputs.push(TxOutput::new(
                     value,
                     OutputPurpose::Transfer(Destination::AnyoneCanSpend),
@@ -936,6 +1001,10 @@ mod tests {
         }
     }
 
+    fn get_relay_fee_from_tx_size(tx_size: usize) -> u128 {
+        u128::try_from(tx_size * RELAY_FEE_PER_BYTE).expect("relay fee overflow")
+    }
+
     #[test]
     fn add_single_tx() -> anyhow::Result<()> {
         let mut mempool = MempoolImpl::create(ChainStateMock::new());
@@ -956,7 +1025,8 @@ mod tests {
             0,
             InputWitness::NoSignature(Some(DUMMY_WITNESS_MSG.to_vec())),
         );
-        let tx = tx_spend_input(&mempool, input, None, flags, locktime)?;
+        let relay_fee = Amount::from_atoms(get_relay_fee_from_tx_size(TX_SPEND_INPUT_SIZE));
+        let tx = tx_spend_input(&mempool, input, relay_fee, flags, locktime)?;
 
         let tx_clone = tx.clone();
         let tx_id = tx.get_id();
@@ -1205,13 +1275,16 @@ mod tests {
             .next()
             .expect("there should be an outpoint since setup creates the genesis transaction")
             .outpoint
-            .to_owned();
+            .clone();
 
-        let outpoint_source_id = OutPointSourceId::from(
-            outpoint.get_tx_id().get_tx_id().expect("Not Coinbase").to_owned(),
+        let outpoint_source_id =
+            OutPointSourceId::from(outpoint.tx_id().get_tx_id().expect("Not Coinbase").clone());
+
+        let input = TxInput::new(
+            outpoint_source_id,
+            0,
+            InputWitness::NoSignature(Some(DUMMY_WITNESS_MSG.to_vec())),
         );
-
-        let input = TxInput::new(outpoint_source_id, 0, DUMMY_WITNESS_MSG.to_vec());
         let flags = 1;
         let locktime = 0;
         let tx = tx_spend_input(&mempool, input.clone(), original_fee, flags, locktime)
@@ -1228,24 +1301,26 @@ mod tests {
 
     #[test]
     fn tx_replace() -> anyhow::Result<()> {
-        let relay_fee =
-            u128::try_from(TX_SPEND_INPUT_SIZE * RELAY_FEE_PER_BYTE).expect("relay fee overflow");
+        let relay_fee = get_relay_fee_from_tx_size(TX_SPEND_INPUT_SIZE);
         let replacement_fee = Amount::from_atoms(relay_fee + 100);
-        assert!(test_replace_tx(Amount::from_atoms(100), replacement_fee).is_ok());
+        test_replace_tx(Amount::from_atoms(100), replacement_fee)?;
+        let res = test_replace_tx(Amount::from_atoms(100), Amount::from_atoms(relay_fee + 99));
         assert!(matches!(
-            test_replace_tx(Amount::from_atoms(100), Amount::from_atoms(relay_fee + 99)),
+            res,
             Err(Error::TxValidationError(
-                TxValidationError::InsufficientFeesToRelay
+                TxValidationError::InsufficientFeesToRelayRBF
             ))
         ));
+        let res = test_replace_tx(Amount::from_atoms(100), Amount::from_atoms(100));
         assert!(matches!(
-            test_replace_tx(Amount::from_atoms(10), Amount::from_atoms(10)),
+            res,
             Err(Error::TxValidationError(
                 TxValidationError::ReplacementFeeLowerThanOriginal { .. }
             ))
         ));
+        let res = test_replace_tx(Amount::from_atoms(100), Amount::from_atoms(90));
         assert!(matches!(
-            test_replace_tx(Amount::from_atoms(10), Amount::from_atoms(5)),
+            res,
             Err(Error::TxValidationError(
                 TxValidationError::ReplacementFeeLowerThanOriginal { .. }
             ))
@@ -1275,15 +1350,14 @@ mod tests {
         let child_tx = tx_spend_input(
             &mempool,
             child_tx_input.clone(),
-            Amount::from_atoms(10),
+            Amount::from_atoms(100),
             flags,
             locktime,
         )?;
         mempool.add_transaction(child_tx)?;
 
-        let relay_fee =
-            u128::try_from(TX_SPEND_INPUT_SIZE * RELAY_FEE_PER_BYTE).expect("relay fee overflow");
-        let replacement_fee = Amount::from_atoms(relay_fee + 15);
+        let relay_fee = get_relay_fee_from_tx_size(TX_SPEND_INPUT_SIZE);
+        let replacement_fee = Amount::from_atoms(relay_fee + 100);
         let replacement_tx =
             tx_spend_input(&mempool, child_tx_input, replacement_fee, flags, locktime)?;
         mempool.add_transaction(replacement_tx)?;
@@ -1300,17 +1374,20 @@ mod tests {
         flags: u32,
         locktime: u32,
     ) -> anyhow::Result<Transaction> {
+        let fee = fee.into().map_or_else(
+            || Amount::from_atoms(get_relay_fee_from_tx_size(estimate_tx_size(1, 2))),
+            std::convert::identity,
+        );
         tx_spend_several_inputs(mempool, &[input], fee, flags, locktime)
     }
 
     fn tx_spend_several_inputs(
         mempool: &MempoolImpl<ChainStateMock>,
         inputs: &[TxInput],
-        fee: impl Into<Option<Amount>>,
+        fee: Amount,
         flags: u32,
         locktime: u32,
     ) -> anyhow::Result<Transaction> {
-        let fee = fee.into().map_or(Amount::from_atoms(0), std::convert::identity);
         let input_value = inputs
             .iter()
             .map(|input| mempool.get_input_value(input))
@@ -1319,10 +1396,12 @@ mod tests {
             .sum::<Option<_>>()
             .expect("tx_spend_input: overflow");
 
-        let available_for_spending = (input_value - fee).expect("underflow");
+        let available_for_spending = (input_value - fee)
+            .expect("tx_spend_several_inputs: underflow computing available_for_spending");
         let spent = (available_for_spending / 2).expect("division error");
 
-        let change = (available_for_spending - spent).expect("underflow");
+        let change = (available_for_spending - spent)
+            .expect("tx_spend_several_inputs: underflow_computing change");
 
         Transaction::new(
             flags,
@@ -1339,6 +1418,8 @@ mod tests {
     #[test]
     fn one_ancestor_signal_is_enough() -> anyhow::Result<()> {
         let mut mempool = setup();
+        // TODO add a function which calculates the tx size based on number of outputs and inputs,
+        // so that we can calculate the minimum relay fee
         let tx = TxGenerator::new(&mempool)
             .with_num_outputs(2)
             .generate_tx()
@@ -1390,7 +1471,8 @@ mod tests {
             InputWitness::NoSignature(Some(DUMMY_WITNESS_MSG.to_vec())),
         );
 
-        let original_fee = Amount::from_atoms(10);
+        // TODO compute minimum necessary relay fee instead of just overestimating it
+        let original_fee = Amount::from_atoms(200);
         let dummy_output = TxOutput::new(
             original_fee,
             OutputPurpose::Transfer(Destination::AnyoneCanSpend),
@@ -1488,28 +1570,29 @@ mod tests {
             .replaceable()
             .generate_tx()
             .expect("generate_tx failed");
-        let input = tx.get_inputs().first().expect("one input").to_owned();
-        let outputs = tx.get_outputs().clone();
+        let input = tx.inputs().first().expect("one input").clone();
+        let outputs = tx.outputs().clone();
         let tx_id = tx.get_id();
         mempool.add_transaction(tx)?;
 
         let flags = 0;
         let locktime = 0;
         let outpoint_source_id = OutPointSourceId::Transaction(tx_id);
+        let fee = get_relay_fee_from_tx_size(TX_SPEND_INPUT_SIZE);
         for (index, _) in outputs.iter().enumerate() {
             let input = TxInput::new(
                 outpoint_source_id.clone(),
                 index.try_into().unwrap(),
-                DUMMY_WITNESS_MSG.to_vec(),
+                InputWitness::NoSignature(Some(DUMMY_WITNESS_MSG.to_vec())),
             );
-            let fee = Amount::from_atoms(0);
-            let tx = tx_spend_input(mempool, input, fee, flags, locktime)?;
+            let tx = tx_spend_input(mempool, input, Amount::from_atoms(fee), flags, locktime)?;
             mempool.add_transaction(tx)?;
         }
 
-        let replacement_tx =
-            tx_spend_input(mempool, input, Amount::from_atoms(100), flags, locktime)?;
-        mempool.add_transaction(replacement_tx).map_err(anyhow::Error::from)
+        let replacement_fee = Amount::from_atoms(1000) * fee;
+        let replacement_tx = tx_spend_input(mempool, input, replacement_fee, flags, locktime)?;
+        mempool.add_transaction(replacement_tx).map_err(anyhow::Error::from)?;
+        Ok(())
     }
 
     #[test]
@@ -1545,15 +1628,24 @@ mod tests {
         let outpoint_source_id = OutPointSourceId::Transaction(tx.get_id());
         mempool.add_transaction(tx)?;
 
-        let input1 = TxInput::new(outpoint_source_id.clone(), 0, DUMMY_WITNESS_MSG.to_vec());
-        let input2 = TxInput::new(outpoint_source_id, 1, DUMMY_WITNESS_MSG.to_vec());
+        let input1 = TxInput::new(
+            outpoint_source_id.clone(),
+            0,
+            InputWitness::NoSignature(Some(DUMMY_WITNESS_MSG.to_vec())),
+        );
+        let input2 = TxInput::new(
+            outpoint_source_id,
+            1,
+            InputWitness::NoSignature(Some(DUMMY_WITNESS_MSG.to_vec())),
+        );
 
         let locktime = 0;
         let flags = 0;
-        let original_fee = Amount::from_atoms(0);
+        let original_fee = Amount::from_atoms(100);
         let replaced_tx = tx_spend_input(&mempool, input1.clone(), original_fee, flags, locktime)?;
         mempool.add_transaction(replaced_tx)?;
-        let replacement_fee = Amount::from_atoms(10);
+        let relay_fee = get_relay_fee_from_tx_size(TX_SPEND_INPUT_SIZE);
+        let replacement_fee = Amount::from_atoms(100 + relay_fee);
         let incoming_tx = tx_spend_several_inputs(
             &mempool,
             &[input1, input2],
@@ -1575,15 +1667,16 @@ mod tests {
     #[test]
     fn pays_more_than_conflicts_with_descendants() -> anyhow::Result<()> {
         let mut mempool = setup();
-        let tx = TxGenerator::new(&mempool)
-            .replaceable()
-            .generate_tx()
-            .expect("generate_replaceable_tx");
+        let tx = TxGenerator::new(&mempool).generate_tx().expect("generate_replaceable_tx");
         let tx_id = tx.get_id();
         mempool.add_transaction(tx)?;
 
         let outpoint_source_id = OutPointSourceId::Transaction(tx_id);
-        let input = TxInput::new(outpoint_source_id, 0, DUMMY_WITNESS_MSG.to_vec());
+        let input = TxInput::new(
+            outpoint_source_id,
+            0,
+            InputWitness::NoSignature(Some(DUMMY_WITNESS_MSG.to_vec())),
+        );
 
         let locktime = 0;
         let rbf = 1;
@@ -1592,6 +1685,7 @@ mod tests {
         // Create transaction that we will attempt to replace
         let original_fee = Amount::from_atoms(100);
         let replaced_tx = tx_spend_input(&mempool, input.clone(), original_fee, rbf, locktime)?;
+        let replaced_tx_fee = mempool.try_get_fee(&replaced_tx)?;
         let replaced_id = replaced_tx.get_id();
         mempool.add_transaction(replaced_tx)?;
 
@@ -1604,7 +1698,7 @@ mod tests {
             TxInput::new(
                 descendant_outpoint_source_id.clone(),
                 0,
-                DUMMY_WITNESS_MSG.to_vec(),
+                InputWitness::NoSignature(Some(DUMMY_WITNESS_MSG.to_vec())),
             ),
             descendant1_fee,
             no_rbf,
@@ -1615,7 +1709,11 @@ mod tests {
         let descendant2_fee = Amount::from_atoms(100);
         let descendant2 = tx_spend_input(
             &mempool,
-            TxInput::new(descendant_outpoint_source_id, 1, DUMMY_WITNESS_MSG.to_vec()),
+            TxInput::new(
+                descendant_outpoint_source_id,
+                1,
+                InputWitness::NoSignature(Some(DUMMY_WITNESS_MSG.to_vec())),
+            ),
             descendant2_fee,
             no_rbf,
             locktime,
@@ -1625,7 +1723,10 @@ mod tests {
         //Create a new incoming transaction that conflicts with `replaced_tx` because it spends
         //`input`. It will be rejected because its fee exactly equals (so is not greater than) the
         //sum of the fees of the conflict together with its descendants
-        let insufficient_rbf_fee = Amount::from_atoms(300);
+        let insufficient_rbf_fee = [replaced_tx_fee, descendant1_fee, descendant2_fee]
+            .into_iter()
+            .sum::<Option<_>>()
+            .unwrap();
         let incoming_tx = tx_spend_input(
             &mempool,
             input.clone(),
@@ -1641,12 +1742,10 @@ mod tests {
             ))
         ));
 
-        let relay_fee =
-            u128::try_from(TX_SPEND_INPUT_SIZE * RELAY_FEE_PER_BYTE).expect("relay fee overflow");
-        let sufficient_rbf_fee = Amount::from_atoms(300 + relay_fee);
+        let relay_fee = get_relay_fee_from_tx_size(TX_SPEND_INPUT_SIZE);
+        let sufficient_rbf_fee = insufficient_rbf_fee + Amount::from_atoms(relay_fee);
         let incoming_tx = tx_spend_input(&mempool, input, sufficient_rbf_fee, no_rbf, locktime)?;
-        assert!(mempool.add_transaction(incoming_tx).is_ok());
-
+        mempool.add_transaction(incoming_tx)?;
         Ok(())
     }
 }
