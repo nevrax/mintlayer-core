@@ -1467,6 +1467,7 @@ mod tests {
     }
 
     fn setup() -> MempoolImpl<ChainStateMock, SystemClock, SystemUsageEstimator> {
+        logging::try_init_logging::<&str>(None);
         MempoolImpl::create(
             ChainStateMock::new(),
             SystemClock {},
@@ -1784,13 +1785,18 @@ mod tests {
             .collect::<Result<Vec<_>, _>>()?
             .into_iter()
             .sum::<Option<_>>()
-            .ok_or_else(|| anyhow::anyhow!("tx_spend_input: overflow"))?;
+            .ok_or_else(|| {
+                let msg = String::from("tx_spend_input: overflow");
+                log::error!("{}", msg);
+                anyhow::Error::msg(msg)
+            })?;
 
         let available_for_spending = (input_value - fee).ok_or_else(|| {
             let msg = format!(
                 "tx_spend_several_inputs: input_value ({:?}) lower than fee ({:?})",
                 input_value, fee
             );
+            log::error!("{}", msg);
             anyhow::Error::msg(msg)
         })?;
         let spent = (available_for_spending / 2).expect("division error");
@@ -2265,6 +2271,7 @@ mod tests {
 
     #[test]
     fn rolling_fee() -> anyhow::Result<()> {
+        logging::try_init_logging::<&str>(None);
         let mock_clock = MockClock::new();
         let mut mock_usage = MockGetMemoryUsage::new();
         // Add parent
@@ -2291,7 +2298,10 @@ mod tests {
             .with_num_outputs(num_outputs)
             .generate_tx(&mempool)?;
         let parent_id = parent.get_id();
+        log::debug!("parent_id: {}", parent_id.get());
+        log::debug!("before adding parent");
         mempool.add_transaction(parent)?;
+        log::debug!("after adding parent");
 
         let flags = 0;
         let locktime = 0;
@@ -2310,6 +2320,7 @@ mod tests {
             locktime,
         )?;
         let child_0_id = child_0.get_id();
+        log::debug!("child_0_id {}", child_0_id.get());
 
         let big_fee = Amount::from_atoms(
             get_relay_fee_from_tx_size(estimate_tx_size(num_inputs, num_outputs)) + 100,
@@ -2326,10 +2337,11 @@ mod tests {
             locktime,
         )?;
         let child_1_id = child_1.get_id();
+        log::debug!("child_1_id {}", child_1_id.get());
         mempool.add_transaction(child_0.clone())?;
-        println!("added child_0");
+        log::debug!("added child_0");
         mempool.add_transaction(child_1)?;
-        println!("added child_1");
+        log::debug!("added child_1");
 
         assert_eq!(mempool.store.txs_by_id.len(), 2);
         assert!(mempool.contains_transaction(&child_1_id));
@@ -2355,6 +2367,7 @@ mod tests {
             flags,
             locktime,
         )?;
+        log::debug!("before child2");
         assert!(matches!(
             mempool.add_transaction(child_2),
             Err(Error::TxValidationError(
@@ -2374,6 +2387,7 @@ mod tests {
             flags,
             locktime,
         )?;
+        log::debug!("before child2_high_fee");
         mempool.add_transaction(child_2_high_fee)?;
 
         // We simulate a block being accepted so the rolling fee will begin to decay
@@ -2387,6 +2401,7 @@ mod tests {
         let halflife = ROLLING_FEE_BASE_HALFLIFE / 4;
         mock_clock.increment(halflife);
         let dummy_tx = TxGenerator::new().generate_tx(&mempool)?;
+        log::debug!("first attempt to add dummy");
         assert!(matches!(
             mempool.add_transaction(dummy_tx.clone()),
             Err(Error::TxValidationError(
@@ -2401,6 +2416,7 @@ mod tests {
         mock_clock.increment(halflife);
         // Fee will have dropped under INCREMENTAL_RELAY_FEE_RATE / 2 by now, so it will be set to
         // zero and our tx will be submitted successfully
+        log::debug!("second attempt to add dummy");
         mempool.add_transaction(dummy_tx)?;
         assert_eq!(
             mempool.get_minimum_rolling_fee(),
