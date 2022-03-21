@@ -29,6 +29,10 @@ pub fn init_logging<P: AsRef<std::path::Path>>(_log_file_path: Option<P>) {
     INITIALIZE_LOGGER_ONCE_FLAG.call_once(env_logger::init);
 }
 
+pub fn try_init_logging<P: AsRef<std::path::Path>>(_log_file_path: Option<P>) {
+    let _ = env_logger::try_init();
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
