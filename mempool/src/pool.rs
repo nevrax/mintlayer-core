@@ -351,10 +351,10 @@ impl MempoolStore {
         &self,
         outpoint: &OutPoint,
     ) -> Result<Amount, TxValidationError> {
-        let tx_id = outpoint.tx_id().get_tx_id().expect("Not coinbase").clone();
+        let tx_id = *outpoint.tx_id().get_tx_id().expect("Not coinbase");
         let err = || TxValidationError::OutPointNotFound {
             outpoint: outpoint.clone(),
-            tx_id: tx_id.clone(),
+            tx_id,
         };
         self.txs_by_id
             .get(&tx_id.get())
@@ -1812,7 +1812,7 @@ mod tests {
             .clone();
 
         let outpoint_source_id =
-            OutPointSourceId::from(outpoint.tx_id().get_tx_id().expect("Not Coinbase").clone());
+            OutPointSourceId::from(*outpoint.tx_id().get_tx_id().expect("Not Coinbase"));
 
         let input = TxInput::new(
             outpoint_source_id,
@@ -1847,7 +1847,7 @@ mod tests {
             .clone();
 
         let outpoint_source_id =
-            OutPointSourceId::from(outpoint.tx_id().get_tx_id().expect("Not Coinbase").clone());
+            OutPointSourceId::from(*outpoint.tx_id().get_tx_id().expect("Not Coinbase"));
 
         let input = TxInput::new(
             outpoint_source_id,
@@ -2296,7 +2296,7 @@ mod tests {
         mempool.add_transaction(replaced_tx)?;
 
         // Create some children for this transaction
-        let descendant_outpoint_source_id = OutPointSourceId::Transaction(replaced_id.clone());
+        let descendant_outpoint_source_id = OutPointSourceId::Transaction(replaced_id);
 
         let descendant1_fee = Amount::from_atoms(100);
         let descendant1 = tx_spend_input(
@@ -2414,7 +2414,7 @@ mod tests {
 
         let flags = 0;
         let locktime = 0;
-        let outpoint_source_id = OutPointSourceId::Transaction(parent_id.clone());
+        let outpoint_source_id = OutPointSourceId::Transaction(parent_id);
         let child_0 = tx_spend_input(
             &mempool,
             TxInput::new(
@@ -2492,7 +2492,7 @@ mod tests {
 
         let flags = 0;
         let locktime = 0;
-        let outpoint_source_id = OutPointSourceId::Transaction(parent_id.clone());
+        let outpoint_source_id = OutPointSourceId::Transaction(parent_id);
 
         // child_0 has the lower fee so it will be evicted when memory usage is too high
         let child_0 = tx_spend_input(
@@ -2727,7 +2727,7 @@ mod tests {
         let tx_c = tx_spend_input(
             &mempool,
             TxInput::new(
-                OutPointSourceId::Transaction(tx_b_id.clone()),
+                OutPointSourceId::Transaction(tx_b_id),
                 0,
                 InputWitness::NoSignature(Some(DUMMY_WITNESS_MSG.to_vec())),
             ),
@@ -2810,7 +2810,7 @@ mod tests {
 
         let flags = 0;
         let locktime = 0;
-        let outpoint_source_id = OutPointSourceId::Transaction(parent_id.clone());
+        let outpoint_source_id = OutPointSourceId::Transaction(parent_id);
         let child = tx_spend_input(
             &mempool,
             TxInput::new(
