@@ -13,12 +13,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod protocol;
-
-pub use protocol::{Protocol, ProtocolType};
-
-use std::collections::HashSet;
-
 use super::*;
 
 /// Discovered peer address information
@@ -55,8 +49,9 @@ pub struct PeerInfo<T: NetworkingService> {
     /// User agent of the peer
     pub agent: Option<String>,
 
-    /// A set of supported protocols.
-    pub protocols: HashSet<Protocol>,
+    // TODO: protocolid must not generic!
+    /// List of supported protocols
+    pub protocols: Vec<T::ProtocolId>,
 }
 
 impl<T: NetworkingService> Display for PeerInfo<T> {
