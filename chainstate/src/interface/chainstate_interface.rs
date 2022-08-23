@@ -15,8 +15,12 @@
 
 use std::sync::Arc;
 
+use common::chain::TxInput;
 use common::{
-    chain::block::{Block, BlockHeader, GenBlock},
+    chain::{
+        block::{Block, BlockHeader, GenBlock},
+        Transaction,
+    },
     primitives::{BlockHeight, Id},
 };
 
@@ -58,4 +62,6 @@ pub trait ChainstateInterface: Send {
         &self,
         headers: Vec<BlockHeader>,
     ) -> Result<Vec<BlockHeader>, ChainstateError>;
+
+    fn available_inputs(&self, tx: &Transaction) -> Vec<TxInput>;
 }

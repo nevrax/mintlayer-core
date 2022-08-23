@@ -19,6 +19,8 @@ use std::{
 };
 
 use chainstate_types::Locator;
+use common::chain::Transaction;
+use common::chain::TxInput;
 use common::{
     chain::{Block, GenBlock},
     primitives::{BlockHeight, Id},
@@ -90,6 +92,10 @@ impl<
         headers: Vec<common::chain::block::BlockHeader>,
     ) -> Result<Vec<common::chain::block::BlockHeader>, ChainstateError> {
         self.deref().filter_already_existing_blocks(headers)
+    }
+
+    fn available_inputs(&self, tx: &Transaction) -> Vec<TxInput> {
+        self.deref().available_inputs(tx)
     }
 }
 #[cfg(test)]

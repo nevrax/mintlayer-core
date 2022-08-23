@@ -15,6 +15,8 @@
 
 use std::sync::Arc;
 
+use common::chain::Transaction;
+use common::chain::TxInput;
 use common::{
     chain::block::{Block, BlockHeader, GenBlock},
     primitives::{BlockHeight, Id},
@@ -52,5 +54,6 @@ mockall::mock! {
             &self,
             headers: Vec<BlockHeader>,
         ) -> Result<Vec<BlockHeader>, ChainstateError>;
+        fn available_inputs(&self, tx: &Transaction) -> Vec<TxInput>;
     }
 }

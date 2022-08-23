@@ -14,6 +14,8 @@
 // limitations under the License.
 
 use chainstate_storage::BlockchainStorage;
+use common::chain::Transaction;
+use common::chain::TxInput;
 use common::{
     chain::block::{Block, BlockHeader, GenBlock},
     primitives::{BlockHeight, Id},
@@ -116,5 +118,9 @@ impl<S: BlockchainStorage> ChainstateInterface for ChainstateInterfaceImpl<S> {
             .map_err(ChainstateError::FailedToReadProperty)?
             .expect("Best block index could not be found");
         Ok(best_block_index.block_height())
+    }
+
+    fn available_inputs(&self, _tx: &Transaction) -> Vec<TxInput> {
+        vec![]
     }
 }
