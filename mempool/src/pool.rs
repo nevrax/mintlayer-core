@@ -13,13 +13,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cell::Cell;
 use std::collections::BTreeSet;
 use std::fmt::Debug;
 use std::time::Duration;
 
 use chainstate::chainstate_interface::ChainstateInterface;
 use common::chain::tokens::OutputValue;
+use parking_lot::RwLock;
 use serialization::Encode;
 
 use common::chain::transaction::Transaction;
@@ -49,9 +49,9 @@ mod store;
 
 impl<C, T, M> TryGetFee for Mempool<C, T, M>
 where
-    C: ChainState + Send,
-    T: GetTime + Send,
-    M: GetMemoryUsage + Send,
+    C: ChainState + Send + std::marker::Sync,
+    T: GetTime + Send + std::marker::Sync,
+    M: GetMemoryUsage + Send + std::marker::Sync,
 {
     // TODO this calculation is already done in ChainState, reuse it
     fn try_get_fee(&self, tx: &Transaction) -> Result<Amount, TxValidationError> {
@@ -87,8 +87,9 @@ fn get_relay_fee(tx: &Transaction) -> Amount {
     Amount::from_atoms(u128::try_from(tx.encoded_size() * RELAY_FEE_PER_BYTE).expect("Overflow"))
 }
 
+#[async_trait::async_trait]
 pub trait MempoolInterface<C>: Send {
-    fn add_transaction(&mut self, tx: Transaction) -> Result<(), Error>;
+    async fn add_transaction(&mut self, tx: Transaction) -> Result<(), Error>;
     fn get_all(&self) -> Vec<&Transaction>;
 
     // Returns `true` if the mempool contains a transaction with the given id, `false` otherwise.
@@ -139,7 +140,7 @@ struct RollingFeeRate {
 impl RollingFeeRate {
     #[allow(clippy::float_arithmetic)]
     fn decay_fee(mut self, halflife: Time, current_time: Time) -> Self {
-        log::trace!(
+        log::debug!(
             "decay_fee: old fee rate:  {:?}\nCurrent time: {:?}\nLast Rolling Fee Update: {:?}\nHalflife: {:?}",
             self.rolling_minimum_fee_rate,
             self.last_rolling_fee_update,
@@ -154,7 +155,7 @@ impl RollingFeeRate {
             (self.rolling_minimum_fee_rate.atoms_per_kb() as f64 / divisor) as u128,
         ));
 
-        log::trace!(
+        log::debug!(
             "decay_fee: new fee rate:  {:?}",
             self.rolling_minimum_fee_rate
         );
@@ -176,10 +177,10 @@ impl RollingFeeRate {
 pub struct Mempool<
     C: ChainState + 'static + Send,
     T: GetTime + 'static + Send,
-    M: GetMemoryUsage + 'static + Send,
+    M: GetMemoryUsage + 'static + Send + std::marker::Sync,
 > {
     store: MempoolStore,
-    rolling_fee_rate: Cell<RollingFeeRate>,
+    rolling_fee_rate: RwLock<RollingFeeRate>,
     max_size: usize,
     max_tx_age: Duration,
     chain_state: C,
@@ -191,9 +192,9 @@ pub struct Mempool<
 
 impl<C, T, M> std::fmt::Debug for Mempool<C, T, M>
 where
-    C: ChainState + 'static + Send,
-    T: GetTime + 'static + Send,
-    M: GetMemoryUsage + 'static + Send,
+    C: ChainState + 'static + Send + std::marker::Sync,
+    T: GetTime + 'static + Send + std::marker::Sync,
+    M: GetMemoryUsage + 'static + Send + std::marker::Sync,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:?}", self.store)
@@ -202,9 +203,9 @@ where
 
 impl<C, T, M> Mempool<C, T, M>
 where
-    C: ChainState + Send,
-    T: GetTime + Send,
-    M: GetMemoryUsage + Send,
+    C: ChainState + Send + std::marker::Sync,
+    T: GetTime + Send + std::marker::Sync,
+    M: GetMemoryUsage + Send + std::marker::Sync,
 {
     pub(crate) fn new(
         chain_state: C,
@@ -218,7 +219,7 @@ where
             chainstate_handle,
             max_size: MAX_MEMPOOL_SIZE_BYTES,
             max_tx_age: DEFAULT_MEMPOOL_EXPIRY,
-            rolling_fee_rate: Cell::new(RollingFeeRate::new(clock.get_time())),
+            rolling_fee_rate: parking_lot::RwLock::new(RollingFeeRate::new(clock.get_time())),
             clock,
             memory_usage_estimator,
         }
@@ -240,14 +241,15 @@ where
     }
 
     pub(crate) fn update_min_fee_rate(&self, rate: FeeRate) {
-        let mut rolling_fee_rate = self.rolling_fee_rate.get();
-        rolling_fee_rate.rolling_minimum_fee_rate = rate;
+        let mut rolling_fee_rate = self.rolling_fee_rate.write();
+        (*rolling_fee_rate).rolling_minimum_fee_rate = rate;
         rolling_fee_rate.block_since_last_rolling_fee_bump = false;
-        self.rolling_fee_rate.set(rolling_fee_rate)
     }
 
     pub(crate) fn get_update_min_fee_rate(&self) -> FeeRate {
-        let rolling_fee_rate = self.rolling_fee_rate.get();
+        log::debug!("get_update_min_fee_rate");
+        let rolling_fee_rate = *self.rolling_fee_rate.read();
+        log::debug!("after read");
         if !rolling_fee_rate.block_since_last_rolling_fee_bump
             || rolling_fee_rate.rolling_minimum_fee_rate == FeeRate::new(Amount::from_atoms(0))
         {
@@ -262,32 +264,38 @@ where
                 self.rolling_fee_rate
             );
 
-            if self.rolling_fee_rate.get().rolling_minimum_fee_rate < *INCREMENTAL_RELAY_THRESHOLD {
-                log::trace!("rolling fee rate {:?} less than half of the incremental fee rate, dropping the fee", self.rolling_fee_rate.get().rolling_minimum_fee_rate);
+            if self.rolling_fee_rate.read().rolling_minimum_fee_rate < *INCREMENTAL_RELAY_THRESHOLD
+            {
+                log::trace!("rolling fee rate {:?} less than half of the incremental fee rate, dropping the fee", self.rolling_fee_rate.read().rolling_minimum_fee_rate);
                 self.drop_rolling_fee();
-                return self.rolling_fee_rate.get().rolling_minimum_fee_rate;
+                return self.rolling_fee_rate.read().rolling_minimum_fee_rate;
             }
         }
 
         std::cmp::max(
-            self.rolling_fee_rate.get().rolling_minimum_fee_rate,
+            self.rolling_fee_rate.read().rolling_minimum_fee_rate,
             *INCREMENTAL_RELAY_FEE_RATE,
         )
     }
 
     fn drop_rolling_fee(&self) {
-        let mut rolling_fee_rate = self.rolling_fee_rate.get();
-        rolling_fee_rate.rolling_minimum_fee_rate = FeeRate::new(Amount::from_atoms(0));
-        self.rolling_fee_rate.set(rolling_fee_rate)
+        let mut rolling_fee_rate = self.rolling_fee_rate.write();
+        (*rolling_fee_rate).rolling_minimum_fee_rate = FeeRate::new(Amount::from_atoms(0));
     }
 
     fn decay_rolling_fee_rate(&self) {
+        log::debug!("decay_rolling_fee_rate");
         let halflife = self.rolling_fee_halflife();
         let time = self.clock.get_time();
-        self.rolling_fee_rate.set(self.rolling_fee_rate.get().decay_fee(halflife, time));
+        let mut rolling_fee_rate = self.rolling_fee_rate.write();
+        *rolling_fee_rate = (*rolling_fee_rate).decay_fee(halflife, time);
+        log::debug!("decay_rolling_fee_rate_end: {:?}", self.rolling_fee_rate);
     }
 
-    fn verify_inputs_available(&self, tx: &Transaction) -> Result<(), TxValidationError> {
+    async fn verify_inputs_available(&self, tx: &Transaction) -> Result<(), TxValidationError> {
+        let tx_clone = tx.clone();
+        let _chainstate_inputs =
+            self.chainstate_handle.call(move |this| this.available_inputs(&tx_clone)).await;
         tx.inputs()
             .iter()
             .map(TxInput::outpoint)
@@ -334,7 +342,7 @@ where
         res
     }
 
-    fn validate_transaction(&self, tx: &Transaction) -> Result<Conflicts, TxValidationError> {
+    async fn validate_transaction(&self, tx: &Transaction) -> Result<Conflicts, TxValidationError> {
         // This validation function is based on Bitcoin Core's MemPoolAccept::PreChecks.
         // However, as of this stage it does not cover everything covered in Bitcoin Core
         //
@@ -401,7 +409,7 @@ where
 
         let conflicts = self.rbf_checks(tx)?;
 
-        self.verify_inputs_available(tx)?;
+        self.verify_inputs_available(tx).await?;
 
         self.pays_minimum_relay_fees(tx)?;
 
@@ -411,6 +419,7 @@ where
     }
 
     fn pays_minimum_mempool_fee(&self, tx: &Transaction) -> Result<(), TxValidationError> {
+        log::debug!("pays_minimum_mempool_fee");
         let tx_fee = self.try_get_fee(tx)?;
         let minimum_fee = self.get_update_minimum_mempool_fee(tx);
         ensure!(
@@ -611,7 +620,7 @@ where
             let new_minimum_fee_rate =
                 *removed_fees.iter().max().expect("removed_fees should not be empty")
                     + *INCREMENTAL_RELAY_FEE_RATE;
-            if new_minimum_fee_rate > self.rolling_fee_rate.get().rolling_minimum_fee_rate {
+            if new_minimum_fee_rate > self.rolling_fee_rate.read().rolling_minimum_fee_rate {
                 self.update_min_fee_rate(new_minimum_fee_rate)
             }
         }
@@ -685,18 +694,18 @@ where
 
 trait SpendsUnconfirmed<C, T, M>
 where
-    C: ChainState + Send,
-    T: GetTime + Send,
-    M: GetMemoryUsage + Send,
+    C: ChainState + Send + std::marker::Sync,
+    T: GetTime + Send + std::marker::Sync,
+    M: GetMemoryUsage + Send + std::marker::Sync,
 {
     fn spends_unconfirmed(&self, mempool: &Mempool<C, T, M>) -> bool;
 }
 
 impl<C, T, M> SpendsUnconfirmed<C, T, M> for TxInput
 where
-    C: ChainState + Send,
-    T: GetTime + Send,
-    M: GetMemoryUsage + Send,
+    C: ChainState + Send + std::marker::Sync,
+    T: GetTime + Send + std::marker::Sync,
+    M: GetMemoryUsage + Send + std::marker::Sync,
 {
     fn spends_unconfirmed(&self, mempool: &Mempool<C, T, M>) -> bool {
         mempool.contains_transaction(self.outpoint().tx_id().get_tx_id().expect("Not coinbase"))
@@ -720,27 +729,23 @@ impl GetMemoryUsage for SystemUsageEstimator {
     }
 }
 
+#[async_trait::async_trait]
 impl<C, T, M> MempoolInterface<C> for Mempool<C, T, M>
 where
-    C: ChainState + Send,
-    T: GetTime + Send,
-    M: GetMemoryUsage + Send,
+    C: ChainState + Send + std::marker::Sync,
+    T: GetTime + Send + std::marker::Sync,
+    M: GetMemoryUsage + Send + std::marker::Sync,
 {
     #[cfg(test)]
     fn new_tip_set(&mut self, chain_state: C) {
         self.chain_state = chain_state;
-        self.rolling_fee_rate.set({
-            let mut rolling_fee_rate = self.rolling_fee_rate.get();
-            // TODO Not sure we should set the flag to true when a block is disconnected/during a
-            // reorg
-            rolling_fee_rate.block_since_last_rolling_fee_bump = true;
-            rolling_fee_rate
-        })
+        let mut rolling_fee_rate = self.rolling_fee_rate.write();
+        (*rolling_fee_rate).block_since_last_rolling_fee_bump = true;
     }
     //
 
-    fn add_transaction(&mut self, tx: Transaction) -> Result<(), Error> {
-        let conflicts = self.validate_transaction(&tx)?;
+    async fn add_transaction(&mut self, tx: Transaction) -> Result<(), Error> {
+        let conflicts = self.validate_transaction(&tx).await?;
         self.store.drop_conflicts(conflicts);
         self.finalize_tx(tx)?;
         self.store.assert_valid();

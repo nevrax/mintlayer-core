@@ -59,9 +59,9 @@ pub fn make_mempool<C, T, M>(
     memory_usage_estimator: M,
 ) -> crate::Result<Box<dyn MempoolInterface<C>>>
 where
-    C: ChainState + 'static + Send,
-    T: GetTime + 'static + Send,
-    M: GetMemoryUsage + 'static + Send,
+    C: ChainState + 'static + Send + std::marker::Sync,
+    T: GetTime + 'static + Send + std::marker::Sync,
+    M: GetMemoryUsage + 'static + Send + std::marker::Sync,
 {
     Ok(Box::new(Mempool::new(
         chainstate,
