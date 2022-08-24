@@ -14,6 +14,9 @@
 // limitations under the License.
 
 use super::*;
+use chainstate::make_chainstate;
+use chainstate::ChainstateConfig;
+use common::chain::config::ChainConfig;
 use common::chain::signature::inputsig::InputWitness;
 use common::chain::transaction::{Destination, TxInput, TxOutput};
 use common::chain::OutPointSourceId;
@@ -493,9 +496,8 @@ async fn tx_no_inputs() -> anyhow::Result<()> {
     Ok(())
 }
 
-use chainstate::make_chainstate;
-use chainstate::ChainstateConfig;
-use common::chain::config::ChainConfig;
+// TODO this is copy-pasted from libp2p's test utils. This function should be extracted to an
+// external crate to avoid code duplication
 pub async fn start_chainstate(
     chain_config: Arc<ChainConfig>,
 ) -> subsystem::Handle<Box<dyn ChainstateInterface>> {

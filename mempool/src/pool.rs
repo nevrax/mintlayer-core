@@ -288,7 +288,6 @@ where
     }
 
     fn verify_inputs_available(&self, tx: &Transaction) -> Result<(), TxValidationError> {
-        //let chainstate_inputs = self.chainstate_handle.available_inputs();
         tx.inputs()
             .iter()
             .map(TxInput::outpoint)
