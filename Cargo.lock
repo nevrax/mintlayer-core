@@ -2296,6 +2296,7 @@ dependencies = [
  "serialization",
  "subsystem",
  "thiserror",
+ "tokio",
  "utils",
 ]
 

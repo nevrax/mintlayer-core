@@ -38,9 +38,9 @@ fn dummy_size() {
     log::debug!("1, 400: {}", estimate_tx_size(1, 400));
 }
 
-#[test]
-fn real_size() -> anyhow::Result<()> {
-    let mempool = setup();
+#[tokio::test]
+async fn real_size() -> anyhow::Result<()> {
+    let mempool = setup().await;
     let tx = TxGenerator::new()
         .with_num_inputs(1)
         .with_num_outputs(400)
@@ -99,9 +99,8 @@ impl MempoolStore {
     }
 }
 
-impl<H, T, M> Mempool<ChainStateMock, H, T, M>
+impl<T, M> Mempool<ChainStateMock, T, M>
 where
-    H: Send,
     T: GetTime + Send,
     M: GetMemoryUsage + Send,
 {
@@ -283,9 +282,9 @@ impl TxGenerator {
         }
     }
 
-    fn generate_tx<H: Send, T: GetTime + Send, M: GetMemoryUsage + Send>(
+    fn generate_tx<T: GetTime + Send, M: GetMemoryUsage + Send>(
         &mut self,
-        mempool: &Mempool<ChainStateMock, H, T, M>,
+        mempool: &Mempool<ChainStateMock, T, M>,
     ) -> anyhow::Result<Transaction> {
         self.coin_pool = mempool.available_outpoints(self.allow_double_spend);
         let fee = if let Some(tx_fee) = self.tx_fee {
@@ -414,9 +413,9 @@ fn get_relay_fee_from_tx_size(tx_size: usize) -> u128 {
     u128::try_from(tx_size * RELAY_FEE_PER_BYTE).expect("relay fee overflow")
 }
 
-#[test]
-fn add_single_tx() -> anyhow::Result<()> {
-    let mut mempool = setup();
+#[tokio::test]
+async fn add_single_tx() -> anyhow::Result<()> {
+    let mut mempool = setup().await;
 
     let genesis_tx = mempool
         .chain_state
@@ -451,9 +450,9 @@ fn add_single_tx() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[test]
-fn txs_sorted() -> anyhow::Result<()> {
-    let mut mempool = setup();
+#[tokio::test]
+async fn txs_sorted() -> anyhow::Result<()> {
+    let mut mempool = setup().await;
     let mut tx_generator = TxGenerator::new();
     let target_txs = 10;
 
@@ -478,9 +477,9 @@ fn txs_sorted() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[test]
-fn tx_no_inputs() -> anyhow::Result<()> {
-    let mut mempool = setup();
+#[tokio::test]
+async fn tx_no_inputs() -> anyhow::Result<()> {
+    let mut mempool = setup().await;
     let tx = TxGenerator::new()
         .with_num_inputs(0)
         .with_fee(Amount::from_atoms(0))
@@ -494,9 +493,32 @@ fn tx_no_inputs() -> anyhow::Result<()> {
     Ok(())
 }
 
-struct ChainstateInterfaceMock;
-fn setup() -> Mempool<ChainStateMock, ChainstateInterfaceMock, SystemClock, SystemUsageEstimator> {
-    let chainstate_interface = ChainstateInterfaceMock {};
+use chainstate::make_chainstate;
+use chainstate::ChainstateConfig;
+use common::chain::config::ChainConfig;
+pub async fn start_chainstate(
+    chain_config: Arc<ChainConfig>,
+) -> subsystem::Handle<Box<dyn ChainstateInterface>> {
+    let storage = chainstate_storage::inmemory::Store::new_empty().unwrap();
+    let mut man = subsystem::Manager::new("TODO");
+    let handle = man.add_subsystem(
+        "chainstate",
+        make_chainstate(
+            chain_config,
+            ChainstateConfig::new(),
+            storage,
+            None,
+            Default::default(),
+        )
+        .unwrap(),
+    );
+    tokio::spawn(async move { man.main().await });
+    handle
+}
+
+async fn setup() -> Mempool<ChainStateMock, SystemClock, SystemUsageEstimator> {
+    let config = Arc::new(common::chain::config::create_unit_test_config());
+    let chainstate_interface = start_chainstate(config).await;
     Mempool::new(
         ChainStateMock::new(),
         chainstate_interface,
@@ -505,9 +527,9 @@ fn setup() -> Mempool<ChainStateMock, ChainstateInterfaceMock, SystemClock, Syst
     )
 }
 
-#[test]
-fn tx_no_outputs() -> anyhow::Result<()> {
-    let mut mempool = setup();
+#[tokio::test]
+async fn tx_no_outputs() -> anyhow::Result<()> {
+    let mut mempool = setup().await;
     let tx = TxGenerator::new()
         .with_num_outputs(0)
         .generate_tx(&mempool)
@@ -520,9 +542,9 @@ fn tx_no_outputs() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[test]
-fn tx_duplicate_inputs() -> anyhow::Result<()> {
-    let mut mempool = setup();
+#[tokio::test]
+async fn tx_duplicate_inputs() -> anyhow::Result<()> {
+    let mut mempool = setup().await;
 
     let genesis_tx = mempool
         .chain_state
@@ -559,9 +581,9 @@ fn tx_duplicate_inputs() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[test]
-fn tx_already_in_mempool() -> anyhow::Result<()> {
-    let mut mempool = setup();
+#[tokio::test]
+async fn tx_already_in_mempool() -> anyhow::Result<()> {
+    let mut mempool = setup().await;
 
     let genesis_tx = mempool
         .chain_state
@@ -592,9 +614,9 @@ fn tx_already_in_mempool() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[test]
-fn outpoint_not_found() -> anyhow::Result<()> {
-    let mut mempool = setup();
+#[tokio::test]
+async fn outpoint_not_found() -> anyhow::Result<()> {
+    let mut mempool = setup().await;
 
     let genesis_tx = mempool
         .chain_state
@@ -635,9 +657,9 @@ fn outpoint_not_found() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[test]
-fn tx_too_big() -> anyhow::Result<()> {
-    let mut mempool = setup();
+#[tokio::test]
+async fn tx_too_big() -> anyhow::Result<()> {
+    let mut mempool = setup().await;
     let single_output_size = TxOutput::new(
         OutputValue::Coin(Amount::from_atoms(100)),
         OutputPurpose::Transfer(Destination::AnyoneCanSpend),
@@ -658,13 +680,13 @@ fn tx_too_big() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn test_replace_tx(original_fee: Amount, replacement_fee: Amount) -> Result<(), Error> {
+async fn test_replace_tx(original_fee: Amount, replacement_fee: Amount) -> Result<(), Error> {
     log::debug!(
         "tx_replace_tx: original_fee: {:?}, replacement_fee {:?}",
         original_fee,
         replacement_fee
     );
-    let mut mempool = setup();
+    let mut mempool = setup().await;
     let outpoint = mempool
         .available_outpoints(true)
         .iter()
@@ -703,9 +725,9 @@ fn test_replace_tx(original_fee: Amount, replacement_fee: Amount) -> Result<(), 
     Ok(())
 }
 
-#[test]
-fn try_replace_irreplaceable() -> anyhow::Result<()> {
-    let mut mempool = setup();
+#[tokio::test]
+async fn try_replace_irreplaceable() -> anyhow::Result<()> {
+    let mut mempool = setup().await;
     let outpoint = mempool
         .available_outpoints(true)
         .iter()
@@ -748,26 +770,26 @@ fn try_replace_irreplaceable() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[test]
-fn tx_replace() -> anyhow::Result<()> {
+#[tokio::test]
+async fn tx_replace() -> anyhow::Result<()> {
     let relay_fee = get_relay_fee_from_tx_size(TX_SPEND_INPUT_SIZE);
     let replacement_fee = Amount::from_atoms(relay_fee + 100);
-    test_replace_tx(Amount::from_atoms(100), replacement_fee)?;
-    let res = test_replace_tx(Amount::from_atoms(300), replacement_fee);
+    test_replace_tx(Amount::from_atoms(100), replacement_fee).await?;
+    let res = test_replace_tx(Amount::from_atoms(300), replacement_fee).await;
     assert!(matches!(
         res,
         Err(Error::TxValidationError(
             TxValidationError::InsufficientFeesToRelayRBF
         ))
     ));
-    let res = test_replace_tx(Amount::from_atoms(100), Amount::from_atoms(100));
+    let res = test_replace_tx(Amount::from_atoms(100), Amount::from_atoms(100)).await;
     assert!(matches!(
         res,
         Err(Error::TxValidationError(
             TxValidationError::ReplacementFeeLowerThanOriginal { .. }
         ))
     ));
-    let res = test_replace_tx(Amount::from_atoms(100), Amount::from_atoms(90));
+    let res = test_replace_tx(Amount::from_atoms(100), Amount::from_atoms(90)).await;
     assert!(matches!(
         res,
         Err(Error::TxValidationError(
@@ -777,9 +799,9 @@ fn tx_replace() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[test]
-fn tx_replace_child() -> anyhow::Result<()> {
-    let mut mempool = setup();
+#[tokio::test]
+async fn tx_replace_child() -> anyhow::Result<()> {
+    let mut mempool = setup().await;
     let tx = TxGenerator::new()
         .replaceable()
         .generate_tx(&mempool)
@@ -817,8 +839,8 @@ fn tx_replace_child() -> anyhow::Result<()> {
 // To test our validation of BIP125 Rule#4 (replacement transaction pays for its own bandwidth), we need to know the necessary relay fee before creating the transaction. The relay fee depends on the size of the transaction. The usual way to get the size of a transaction is to call `tx.encoded_size` but we cannot do this until we have created the transaction itself. To get around this cycle, we have precomputed the size of all transaction created by `tx_spend_input`. This value will be the same for all transactions created by this function.
 const TX_SPEND_INPUT_SIZE: usize = 213;
 
-fn tx_spend_input<T: GetTime + Send, H: Send, M: GetMemoryUsage + Send>(
-    mempool: &Mempool<ChainStateMock, H, T, M>,
+fn tx_spend_input<T: GetTime + Send, M: GetMemoryUsage + Send>(
+    mempool: &Mempool<ChainStateMock, T, M>,
     input: TxInput,
     fee: impl Into<Option<Amount>>,
     flags: u32,
@@ -831,8 +853,8 @@ fn tx_spend_input<T: GetTime + Send, H: Send, M: GetMemoryUsage + Send>(
     tx_spend_several_inputs(mempool, &[input], fee, flags, locktime)
 }
 
-fn tx_spend_several_inputs<T: GetTime + Send, H: Send, M: GetMemoryUsage + Send>(
-    mempool: &Mempool<ChainStateMock, H, T, M>,
+fn tx_spend_several_inputs<T: GetTime + Send, M: GetMemoryUsage + Send>(
+    mempool: &Mempool<ChainStateMock, T, M>,
     inputs: &[TxInput],
     fee: Amount,
     flags: u32,
@@ -883,9 +905,9 @@ fn tx_spend_several_inputs<T: GetTime + Send, H: Send, M: GetMemoryUsage + Send>
     .map_err(Into::into)
 }
 
-#[test]
-fn one_ancestor_replaceability_signal_is_enough() -> anyhow::Result<()> {
-    let mut mempool = setup();
+#[tokio::test]
+async fn one_ancestor_replaceability_signal_is_enough() -> anyhow::Result<()> {
+    let mut mempool = setup().await;
     let tx = TxGenerator::new()
         .with_num_outputs(2)
         .generate_tx(&mempool)
@@ -968,10 +990,10 @@ fn one_ancestor_replaceability_signal_is_enough() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[test]
-fn tx_mempool_entry() -> anyhow::Result<()> {
+#[tokio::test]
+async fn tx_mempool_entry() -> anyhow::Result<()> {
     use common::primitives::time;
-    let mut mempool = setup();
+    let mut mempool = setup().await;
     // Input different flag values just to make the hashes of these dummy transactions
     // different
     let txs = (1..=6)
@@ -1030,8 +1052,8 @@ fn tx_mempool_entry() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn test_bip125_max_replacements<H: Send, T: GetTime + Send, M: GetMemoryUsage + Send>(
-    mempool: &mut Mempool<ChainStateMock, H, T, M>,
+fn test_bip125_max_replacements<T: GetTime + Send, M: GetMemoryUsage + Send>(
+    mempool: &mut Mempool<ChainStateMock, T, M>,
     num_potential_replacements: usize,
 ) -> anyhow::Result<()> {
     let tx = TxGenerator::new()
@@ -1071,9 +1093,9 @@ fn test_bip125_max_replacements<H: Send, T: GetTime + Send, M: GetMemoryUsage + 
     Ok(())
 }
 
-#[test]
-fn too_many_conflicts() -> anyhow::Result<()> {
-    let mut mempool = setup();
+#[tokio::test]
+async fn too_many_conflicts() -> anyhow::Result<()> {
+    let mut mempool = setup().await;
     let num_potential_replacements = MAX_BIP125_REPLACEMENT_CANDIDATES + 1;
     let err = test_bip125_max_replacements(&mut mempool, num_potential_replacements)
         .expect_err("expected error TooManyPotentialReplacements")
@@ -1087,16 +1109,16 @@ fn too_many_conflicts() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[test]
-fn not_too_many_conflicts() -> anyhow::Result<()> {
-    let mut mempool = setup();
+#[tokio::test]
+async fn not_too_many_conflicts() -> anyhow::Result<()> {
+    let mut mempool = setup().await;
     let num_potential_replacements = MAX_BIP125_REPLACEMENT_CANDIDATES;
     test_bip125_max_replacements(&mut mempool, num_potential_replacements)
 }
 
-#[test]
-fn spends_new_unconfirmed() -> anyhow::Result<()> {
-    let mut mempool = setup();
+#[tokio::test]
+async fn spends_new_unconfirmed() -> anyhow::Result<()> {
+    let mut mempool = setup().await;
     let tx = TxGenerator::new()
         .with_num_outputs(2)
         .replaceable()
@@ -1142,9 +1164,9 @@ fn spends_new_unconfirmed() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[test]
-fn pays_more_than_conflicts_with_descendants() -> anyhow::Result<()> {
-    let mut mempool = setup();
+#[tokio::test]
+async fn pays_more_than_conflicts_with_descendants() -> anyhow::Result<()> {
+    let mut mempool = setup().await;
     let tx = TxGenerator::new().generate_tx(&mempool).expect("generate_replaceable_tx");
     let tx_id = tx.get_id();
     mempool.add_transaction(tx)?;
@@ -1264,13 +1286,15 @@ impl GetTime for MockClock {
     }
 }
 
-#[test]
-fn only_expired_entries_removed() -> anyhow::Result<()> {
+#[tokio::test]
+async fn only_expired_entries_removed() -> anyhow::Result<()> {
     let mock_clock = MockClock::new();
+    let config = Arc::new(common::chain::config::create_unit_test_config());
+    let chainstate_interface = start_chainstate(config).await;
 
     let mut mempool = Mempool::new(
         ChainStateMock::new(),
-        ChainstateInterfaceMock {},
+        chainstate_interface,
         mock_clock.clone(),
         SystemUsageEstimator {},
     );
@@ -1331,8 +1355,8 @@ fn only_expired_entries_removed() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[test]
-fn rolling_fee() -> anyhow::Result<()> {
+#[tokio::test]
+async fn rolling_fee() -> anyhow::Result<()> {
     logging::init_logging::<&str>(None);
     let mock_clock = MockClock::new();
     let mut mock_usage = MockGetMemoryUsage::new();
@@ -1348,9 +1372,12 @@ fn rolling_fee() -> anyhow::Result<()> {
     mock_usage.expect_get_memory_usage().return_const(0usize);
 
     let chain_state = ChainStateMock::new();
+    let config = Arc::new(common::chain::config::create_unit_test_config());
+    let chainstate_interface = start_chainstate(config).await;
+
     let mut mempool = Mempool::new(
         chain_state,
-        ChainstateInterfaceMock {},
+        chainstate_interface,
         mock_clock.clone(),
         mock_usage,
     );
@@ -1541,9 +1568,9 @@ fn rolling_fee() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[test]
-fn different_size_txs() -> anyhow::Result<()> {
-    let mut mempool = setup();
+#[tokio::test]
+async fn different_size_txs() -> anyhow::Result<()> {
+    let mut mempool = setup().await;
     let initial_tx = TxGenerator::new()
         .with_num_inputs(1)
         .with_num_outputs(10_000)
@@ -1565,9 +1592,9 @@ fn different_size_txs() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[test]
-fn descendant_score() -> anyhow::Result<()> {
-    let mut mempool = setup();
+#[tokio::test]
+async fn descendant_score() -> anyhow::Result<()> {
+    let mut mempool = setup().await;
     let tx = TxGenerator::new()
         .with_num_outputs(2)
         .generate_tx(&mempool)
@@ -1660,8 +1687,8 @@ fn descendant_score() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn check_txs_sorted_by_descendant_sore<H: Send>(
-    mempool: &Mempool<ChainStateMock, H, SystemClock, SystemUsageEstimator>,
+fn check_txs_sorted_by_descendant_sore(
+    mempool: &Mempool<ChainStateMock, SystemClock, SystemUsageEstimator>,
 ) {
     let txs_by_descendant_score =
         mempool.store.txs_by_descendant_score.values().flatten().collect::<Vec<_>>();
@@ -1678,14 +1705,17 @@ fn check_txs_sorted_by_descendant_sore<H: Send>(
     }
 }
 
-#[test]
-fn descendant_of_expired_entry() -> anyhow::Result<()> {
+#[tokio::test]
+async fn descendant_of_expired_entry() -> anyhow::Result<()> {
     let mock_clock = MockClock::new();
     logging::init_logging::<&str>(None);
 
+    let config = Arc::new(common::chain::config::create_unit_test_config());
+    let chainstate_interface = start_chainstate(config).await;
+
     let mut mempool = Mempool::new(
         ChainStateMock::new(),
-        ChainstateInterfaceMock {},
+        chainstate_interface,
         mock_clock.clone(),
         SystemUsageEstimator {},
     );
@@ -1731,8 +1761,8 @@ fn descendant_of_expired_entry() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[test]
-fn mempool_full() -> anyhow::Result<()> {
+#[tokio::test]
+async fn mempool_full() -> anyhow::Result<()> {
     logging::init_logging::<&str>(None);
     let mut mock_usage = MockGetMemoryUsage::new();
     mock_usage
@@ -1741,12 +1771,10 @@ fn mempool_full() -> anyhow::Result<()> {
         .return_const(MAX_MEMPOOL_SIZE_BYTES + 1);
 
     let chain_state = ChainStateMock::new();
-    let mut mempool = Mempool::new(
-        chain_state,
-        ChainstateInterfaceMock {},
-        SystemClock,
-        mock_usage,
-    );
+    let config = Arc::new(common::chain::config::create_unit_test_config());
+    let chainstate_interface = start_chainstate(config).await;
+
+    let mut mempool = Mempool::new(chain_state, chainstate_interface, SystemClock, mock_usage);
 
     let tx = TxGenerator::new().generate_tx(&mempool)?;
     log::debug!("mempool_full: tx has is {}", tx.get_id().get());
@@ -1758,9 +1786,9 @@ fn mempool_full() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[test]
-fn no_empty_bags_in_descendant_score_index() -> anyhow::Result<()> {
-    let mut mempool = setup();
+#[tokio::test]
+async fn no_empty_bags_in_descendant_score_index() -> anyhow::Result<()> {
+    let mut mempool = setup().await;
 
     let num_inputs = 1;
     let num_outputs = 100;

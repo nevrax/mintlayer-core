@@ -15,6 +15,7 @@
 
 #![deny(clippy::clone_on_ref_ptr)]
 
+use chainstate::chainstate_interface::ChainstateInterface;
 use pool::MempoolInterface;
 
 use crate::config::GetMemoryUsage;
@@ -51,15 +52,14 @@ impl ChainState for DummyMempoolChainState {
     }
 }
 
-pub fn make_mempool<C, T, M, H>(
+pub fn make_mempool<C, T, M>(
     chainstate: C,
-    chainstate_handle: H,
+    chainstate_handle: subsystem::Handle<Box<dyn ChainstateInterface>>,
     time_getter: T,
     memory_usage_estimator: M,
 ) -> crate::Result<Box<dyn MempoolInterface<C>>>
 where
     C: ChainState + 'static + Send,
-    H: 'static + Send,
     T: GetTime + 'static + Send,
     M: GetMemoryUsage + 'static + Send,
 {

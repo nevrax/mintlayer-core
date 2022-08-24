@@ -18,6 +18,7 @@ use std::collections::BTreeSet;
 use std::fmt::Debug;
 use std::time::Duration;
 
+use chainstate::chainstate_interface::ChainstateInterface;
 use common::chain::tokens::OutputValue;
 use serialization::Encode;
 
@@ -46,10 +47,9 @@ use crate::config::*;
 
 mod store;
 
-impl<C, H, T, M> TryGetFee for Mempool<C, H, T, M>
+impl<C, T, M> TryGetFee for Mempool<C, T, M>
 where
     C: ChainState + Send,
-    H: Send,
     T: GetTime + Send,
     M: GetMemoryUsage + Send,
 {
@@ -173,10 +173,8 @@ impl RollingFeeRate {
     }
 }
 
-#[derive(Debug)]
 pub struct Mempool<
     C: ChainState + 'static + Send,
-    H: 'static + Send,
     T: GetTime + 'static + Send,
     M: GetMemoryUsage + 'static + Send,
 > {
@@ -186,21 +184,31 @@ pub struct Mempool<
     max_tx_age: Duration,
     chain_state: C,
     #[allow(unused)]
-    chainstate_handle: H,
+    chainstate_handle: subsystem::Handle<Box<dyn ChainstateInterface>>,
     clock: T,
     memory_usage_estimator: M,
 }
 
-impl<C, H, T, M> Mempool<C, H, T, M>
+impl<C, T, M> std::fmt::Debug for Mempool<C, T, M>
+where
+    C: ChainState + 'static + Send,
+    T: GetTime + 'static + Send,
+    M: GetMemoryUsage + 'static + Send,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self.store)
+    }
+}
+
+impl<C, T, M> Mempool<C, T, M>
 where
     C: ChainState + Send,
-    H: Send,
     T: GetTime + Send,
     M: GetMemoryUsage + Send,
 {
     pub(crate) fn new(
         chain_state: C,
-        chainstate_handle: H,
+        chainstate_handle: subsystem::Handle<Box<dyn ChainstateInterface>>,
         clock: T,
         memory_usage_estimator: M,
     ) -> Self {
@@ -280,6 +288,7 @@ where
     }
 
     fn verify_inputs_available(&self, tx: &Transaction) -> Result<(), TxValidationError> {
+        //let chainstate_inputs = self.chainstate_handle.available_inputs();
         tx.inputs()
             .iter()
             .map(TxInput::outpoint)
@@ -675,24 +684,22 @@ where
     }
 }
 
-trait SpendsUnconfirmed<C, H, T, M>
+trait SpendsUnconfirmed<C, T, M>
 where
     C: ChainState + Send,
-    H: Send,
     T: GetTime + Send,
     M: GetMemoryUsage + Send,
 {
-    fn spends_unconfirmed(&self, mempool: &Mempool<C, H, T, M>) -> bool;
+    fn spends_unconfirmed(&self, mempool: &Mempool<C, T, M>) -> bool;
 }
 
-impl<C, H, T, M> SpendsUnconfirmed<C, H, T, M> for TxInput
+impl<C, T, M> SpendsUnconfirmed<C, T, M> for TxInput
 where
     C: ChainState + Send,
-    H: Send,
     T: GetTime + Send,
     M: GetMemoryUsage + Send,
 {
-    fn spends_unconfirmed(&self, mempool: &Mempool<C, H, T, M>) -> bool {
+    fn spends_unconfirmed(&self, mempool: &Mempool<C, T, M>) -> bool {
         mempool.contains_transaction(self.outpoint().tx_id().get_tx_id().expect("Not coinbase"))
     }
 }
@@ -714,10 +721,9 @@ impl GetMemoryUsage for SystemUsageEstimator {
     }
 }
 
-impl<C, H, T, M> MempoolInterface<C> for Mempool<C, H, T, M>
+impl<C, T, M> MempoolInterface<C> for Mempool<C, T, M>
 where
     C: ChainState + Send,
-    H: Send,
     T: GetTime + Send,
     M: GetMemoryUsage + Send,
 {
