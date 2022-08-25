@@ -2289,6 +2289,7 @@ dependencies = [
  "chainstate",
  "chainstate-storage",
  "common",
+ "futures",
  "jsonrpsee",
  "lazy_static",
  "logging",

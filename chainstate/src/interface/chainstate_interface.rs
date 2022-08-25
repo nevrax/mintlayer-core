@@ -13,9 +13,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
+use common::chain::OutPoint;
 use common::chain::TxInput;
+use common::primitives::Amount;
 use common::{
     chain::{
         block::{Block, BlockHeader, GenBlock},
@@ -63,5 +66,12 @@ pub trait ChainstateInterface: Send {
         headers: Vec<BlockHeader>,
     ) -> Result<Vec<BlockHeader>, ChainstateError>;
 
+    /// Returns all spendable inputs of a Transaction
     fn available_inputs(&self, tx: &Transaction) -> Vec<TxInput>;
+
+    /// Returns the value of a given OutPoint
+    fn get_outpoint_value(&self, outpoint: &OutPoint) -> Result<Amount, ChainstateError>;
+
+    /// Returns the current utxo set
+    fn confirmed_outpoints(&self) -> Result<BTreeSet<OutPoint>, ChainstateError>;
 }

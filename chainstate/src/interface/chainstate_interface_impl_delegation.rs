@@ -97,6 +97,19 @@ impl<
     fn available_inputs(&self, tx: &Transaction) -> Vec<TxInput> {
         self.deref().available_inputs(tx)
     }
+
+    fn get_outpoint_value(
+        &self,
+        outpoint: &common::chain::OutPoint,
+    ) -> Result<common::primitives::Amount, ChainstateError> {
+        self.deref().get_outpoint_value(outpoint)
+    }
+
+    fn confirmed_outpoints(
+        &self,
+    ) -> Result<std::collections::BTreeSet<common::chain::OutPoint>, ChainstateError> {
+        self.deref().confirmed_outpoints()
+    }
 }
 #[cfg(test)]
 mod tests {

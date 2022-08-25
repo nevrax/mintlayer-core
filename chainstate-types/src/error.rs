@@ -41,6 +41,10 @@ pub enum PropertyQueryError {
         block_height: BlockHeight,
         ancestor_height: BlockHeight,
     },
+    #[error("Outpoint not found")]
+    OutpointNotFound,
+    #[error("Transaction not found")]
+    TxNotFound,
     #[error("Genesis block has no header")]
     GenesisHeaderRequested,
 }

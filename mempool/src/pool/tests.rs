@@ -52,17 +52,9 @@ async fn real_size() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn valued_outpoint(
-    tx_id: &Id<Transaction>,
-    outpoint_index: u32,
-    output: &TxOutput,
-) -> ValuedOutPoint {
+fn valued_outpoint(tx_id: &Id<Transaction>, outpoint_index: u32, output: &TxOutput) -> OutPoint {
     let outpoint_source_id = OutPointSourceId::Transaction(*tx_id);
-    let outpoint = OutPoint::new(outpoint_source_id, outpoint_index);
-    let value = match output.value() {
-        OutputValue::Coin(coin) => *coin,
-    };
-    ValuedOutPoint { outpoint, value }
+    OutPoint::new(outpoint_source_id, outpoint_index)
 }
 
 pub(crate) fn create_genesis_tx() -> Transaction {
@@ -83,7 +75,7 @@ pub(crate) fn create_genesis_tx() -> Transaction {
 }
 
 impl TxMempoolEntry {
-    fn outpoints_created(&self) -> BTreeSet<ValuedOutPoint> {
+    fn outpoints_created(&self) -> BTreeSet<OutPoint> {
         let id = self.tx.get_id();
         std::iter::repeat(id)
             .zip(self.tx.outputs().iter().enumerate())
@@ -93,7 +85,7 @@ impl TxMempoolEntry {
 }
 
 impl MempoolStore {
-    fn unconfirmed_outpoints(&self) -> BTreeSet<ValuedOutPoint> {
+    fn unconfirmed_outpoints(&self) -> BTreeSet<OutPoint> {
         self.txs_by_id
             .values()
             .cloned()
@@ -102,58 +94,74 @@ impl MempoolStore {
     }
 }
 
-impl<T, M> Mempool<ChainStateMock, T, M>
+impl<T, M> Mempool<T, M>
 where
     T: GetTime + Send + std::marker::Sync,
     M: GetMemoryUsage + Send + std::marker::Sync,
 {
-    fn available_outpoints(&self, allow_double_spend: bool) -> BTreeSet<ValuedOutPoint> {
+    async fn available_outpoints(
+        &self,
+        allow_double_spend: bool,
+    ) -> anyhow::Result<BTreeSet<OutPoint>> {
         let mut available = self
             .store
             .unconfirmed_outpoints()
             .into_iter()
-            .chain(self.chain_state.confirmed_outpoints())
+            .chain(
+                self.chainstate_handle
+                    .call(|this| this.confirmed_outpoints().expect("confirmed_outpoints"))
+                    .await?
+                    .into_iter(),
+            )
             .collect::<BTreeSet<_>>();
         if !allow_double_spend {
-            available.retain(|valued_outpoint| {
-                !self.store.spender_txs.contains_key(&valued_outpoint.outpoint)
-            });
+            available.retain(|outpoint| !self.store.spender_txs.contains_key(outpoint));
         }
-        available
+        Ok(available)
     }
 
-    fn get_input_value(&self, input: &TxInput) -> anyhow::Result<Amount> {
+    async fn get_input_value(&self, input: &TxInput) -> anyhow::Result<Amount> {
         let allow_double_spend = true;
-        self.available_outpoints(allow_double_spend)
-            .iter()
-            .find_map(|valued_outpoint| {
-                (valued_outpoint.outpoint == *input.outpoint()).then(|| valued_outpoint.value)
-            })
-            .ok_or_else(|| anyhow::anyhow!("No such unconfirmed output"))
+        let outpoint = self
+            .available_outpoints(allow_double_spend)
+            .await?
+            .into_iter()
+            .find(|outpoint| outpoint == input.outpoint())
+            .ok_or_else(|| anyhow::anyhow!("No such unconfirmed output"))?;
+        Ok(self
+            .chainstate_handle
+            .call(move |this| this.get_outpoint_value(&outpoint).expect("get_outpoint_value"))
+            .await
+            .expect("call success"))
     }
 
     fn get_minimum_rolling_fee(&self) -> FeeRate {
         self.rolling_fee_rate.read().rolling_minimum_fee_rate
     }
 
-    fn process_block(&mut self, tx_id: &Id<Transaction>) -> anyhow::Result<()> {
-        let mut chain_state = self.chain_state.clone();
-        chain_state.add_confirmed_tx(WithId::take(
-            self.store
-                .txs_by_id
-                .get(&tx_id.get())
-                .cloned()
-                .ok_or_else(|| {
-                    anyhow::anyhow!("process_block: tx {} not found in mempool", tx_id.get())
-                })?
-                .tx,
-        ));
-        log::debug!("Setting tip to {:?}", chain_state);
-        self.new_tip_set(chain_state);
-        self.drop_transaction(tx_id);
+    async fn process_block(&mut self, tx_id: &Id<Transaction>) -> anyhow::Result<()> {
+        self.chainstate_handle.call(|this| this.process_block(block, source)).await?;
         Ok(())
     }
 }
+/*
+*
+       let mut chain_state = self.chain_state.clone();
+       chain_state.add_confirmed_tx(WithId::take(
+           self.store
+               .txs_by_id
+               .get(&tx_id.get())
+               .cloned()
+               .ok_or_else(|| {
+                   anyhow::anyhow!("process_block: tx {} not found in mempool", tx_id.get())
+               })?
+               .tx,
+       ));
+       log::debug!("Setting tip to {:?}", chain_state);
+       self.new_tip_set(chain_state);
+       self.drop_transaction(tx_id);
+       Ok(())
+* */
 
 #[derive(Debug, Clone)]
 pub(crate) struct ChainStateMock {
@@ -181,7 +189,7 @@ impl ChainStateMock {
         &self.confirmed_txs
     }
 
-    fn confirmed_outpoints(&self) -> BTreeSet<ValuedOutPoint> {
+    fn confirmed_outpoints(&self) -> BTreeSet<OutPoint> {
         self.available_outpoints
             .iter()
             .map(|outpoint| {
@@ -217,23 +225,127 @@ impl ChainStateMock {
     }
 }
 
-impl ChainState for ChainStateMock {
-    fn contains_outpoint(&self, outpoint: &OutPoint) -> bool {
-        self.available_outpoints.iter().any(|value| *value == *outpoint)
+use chainstate::PropertyQueryError;
+use chainstate::{BlockSource, ChainstateError, ChainstateEvent, Locator};
+use common::{
+    chain::{
+        block::{Block, BlockHeader, GenBlock},
+        Transaction,
+    },
+    primitives::{BlockHeight, Id},
+};
+impl ChainstateInterface for ChainStateMock {
+    fn subscribe_to_events(&mut self, handler: Arc<dyn Fn(ChainstateEvent) + Send + Sync>) {
+        unimplemented!()
+    }
+    fn process_block(&mut self, block: Block, source: BlockSource) -> Result<(), ChainstateError> {
+        unimplemented!()
+    }
+    fn preliminary_block_check(&self, block: Block) -> Result<Block, ChainstateError> {
+        unimplemented!()
+    }
+    fn get_best_block_id(&self) -> Result<Id<GenBlock>, ChainstateError> {
+        unimplemented!()
+    }
+    fn is_block_in_main_chain(&self, block_id: &Id<Block>) -> Result<bool, ChainstateError> {
+        unimplemented!()
+    }
+    fn get_block_height_in_main_chain(
+        &self,
+        block_id: &Id<GenBlock>,
+    ) -> Result<Option<BlockHeight>, ChainstateError> {
+        unimplemented!()
+    }
+    fn get_best_block_height(&self) -> Result<BlockHeight, ChainstateError> {
+        unimplemented!()
+    }
+    fn get_block_id_from_height(
+        &self,
+        height: &BlockHeight,
+    ) -> Result<Option<Id<GenBlock>>, ChainstateError> {
+        unimplemented!()
+    }
+    fn get_block(&self, block_id: Id<Block>) -> Result<Option<Block>, ChainstateError> {
+        unimplemented!()
     }
 
-    fn get_outpoint_value(&self, outpoint: &OutPoint) -> Result<Amount, anyhow::Error> {
+    /// Returns a list of block headers whose heights distances increase exponentially starting
+    /// from the current tip.
+    ///
+    /// This returns a relatively short sequence even for a long chain. Such sequence can be used
+    /// to quickly find a common ancestor between different chains.
+    fn get_locator(&self) -> Result<Locator, ChainstateError> {
+        unimplemented!()
+    }
+
+    /// Returns a list of block headers starting from the last locator's block that is in the main
+    /// chain.
+    ///
+    /// The number of returned headers is limited by the `HEADER_LIMIT` constant. The genesis block
+    /// header is returned in case there is no common ancestor with a better block height.
+    fn get_headers(&self, locator: Locator) -> Result<Vec<BlockHeader>, ChainstateError> {
+        unimplemented!()
+    }
+
+    /// Removes all headers that are already known to the chain from the given vector.
+    fn filter_already_existing_blocks(
+        &self,
+        headers: Vec<BlockHeader>,
+    ) -> Result<Vec<BlockHeader>, ChainstateError> {
+        unimplemented!()
+    }
+
+    fn available_inputs(&self, tx: &Transaction) -> Vec<TxInput> {
+        tx.inputs()
+            .iter()
+            .filter(|input| self.available_outpoints.contains(input.outpoint()))
+            .cloned()
+            .collect()
+    }
+
+    fn get_outpoint_value(
+        &self,
+        outpoint: &OutPoint,
+    ) -> Result<Amount, chainstate::ChainstateError> {
         self.confirmed_txs
             .get(&outpoint.tx_id().get_tx_id().expect("Not coinbase").get())
-            .ok_or_else(|| anyhow::anyhow!("tx for outpoint sought in chain state, not found"))
+            .ok_or_else(|| {
+                chainstate::ChainstateError::FailedToReadProperty(PropertyQueryError::TxNotFound)
+            })
             .and_then(|tx| {
                 tx.outputs()
                     .get(outpoint.output_index() as usize)
-                    .ok_or_else(|| anyhow::anyhow!("outpoint index out of bounds"))
+                    .ok_or_else(|| {
+                        chainstate::ChainstateError::FailedToReadProperty(
+                            PropertyQueryError::OutpointNotFound,
+                        )
+                    })
                     .map(|output| match output.value() {
                         OutputValue::Coin(coin) => *coin,
                     })
             })
+    }
+
+    fn confirmed_outpoints(&self) -> Result<BTreeSet<OutPoint>, ChainstateError> {
+        Ok(self
+            .available_outpoints
+            .iter()
+            .map(|outpoint| {
+                let tx_id = outpoint
+                    .tx_id()
+                    .get_tx_id()
+                    .cloned()
+                    .expect("Outpoints in these tests are created from TXs");
+                let index = outpoint.output_index();
+                let tx = self.confirmed_txs.get(&tx_id.get()).expect("Inconsistent Chain State");
+                let output = tx
+                    .outputs()
+                    .get(index as usize)
+                    .expect("Inconsistent Chain State: output not found");
+
+                valued_outpoint(&tx_id, index, output)
+            })
+            .collect())
     }
 }
 
@@ -290,7 +402,7 @@ impl TxGenerator {
         M: GetMemoryUsage + Send + std::marker::Sync,
     >(
         &mut self,
-        mempool: &Mempool<ChainStateMock, T, M>,
+        mempool: &Mempool<T, M>,
     ) -> anyhow::Result<Transaction> {
         self.coin_pool = mempool.available_outpoints(self.allow_double_spend);
         let fee = if let Some(tx_fee) = self.tx_fee {
@@ -521,11 +633,10 @@ pub async fn start_chainstate(
     handle
 }
 
-async fn setup() -> Mempool<ChainStateMock, SystemClock, SystemUsageEstimator> {
+async fn setup() -> Mempool<SystemClock, SystemUsageEstimator> {
     let config = Arc::new(common::chain::config::create_unit_test_config());
     let chainstate_interface = start_chainstate(config).await;
     Mempool::new(
-        ChainStateMock::new(),
         chainstate_interface,
         SystemClock {},
         SystemUsageEstimator {},
@@ -694,10 +805,11 @@ async fn test_replace_tx(original_fee: Amount, replacement_fee: Amount) -> Resul
     let mut mempool = setup().await;
     let outpoint = mempool
         .available_outpoints(true)
+        .await
+        .expect("available_outpoints")
         .iter()
         .next()
         .expect("there should be an outpoint since setup creates the genesis transaction")
-        .outpoint
         .clone();
 
     let outpoint_source_id =
@@ -713,7 +825,10 @@ async fn test_replace_tx(original_fee: Amount, replacement_fee: Amount) -> Resul
     let original = tx_spend_input(&mempool, input.clone(), original_fee, flags, locktime)
         .expect("should be able to spend here");
     let original_id = original.get_id();
-    log::debug!("created a tx with fee {:?}", mempool.try_get_fee(&original));
+    log::debug!(
+        "created a tx with fee {:?}",
+        mempool.try_get_fee(&original).await
+    );
     mempool.add_transaction(original).await?;
 
     let flags = 0;
@@ -721,7 +836,7 @@ async fn test_replace_tx(original_fee: Amount, replacement_fee: Amount) -> Resul
         .expect("should be able to spend here");
     log::debug!(
         "created a replacement with fee {:?}",
-        mempool.try_get_fee(&replacement)
+        mempool.try_get_fee(&replacement).await
     );
     mempool.add_transaction(replacement).await?;
     assert!(!mempool.contains_transaction(&original_id));
@@ -735,10 +850,11 @@ async fn try_replace_irreplaceable() -> anyhow::Result<()> {
     let mut mempool = setup().await;
     let outpoint = mempool
         .available_outpoints(true)
+        .await
+        .expect("available_outpoints")
         .iter()
         .next()
         .expect("there should be an outpoint since setup creates the genesis transaction")
-        .outpoint
         .clone();
 
     let outpoint_source_id =
@@ -848,7 +964,7 @@ fn tx_spend_input<
     T: GetTime + Send + std::marker::Sync,
     M: GetMemoryUsage + Send + std::marker::Sync,
 >(
-    mempool: &Mempool<ChainStateMock, T, M>,
+    mempool: &Mempool<T, M>,
     input: TxInput,
     fee: impl Into<Option<Amount>>,
     flags: u32,
@@ -865,7 +981,7 @@ fn tx_spend_several_inputs<
     T: GetTime + Send + std::marker::Sync,
     M: GetMemoryUsage + Send + std::marker::Sync,
 >(
-    mempool: &Mempool<ChainStateMock, T, M>,
+    mempool: &Mempool<T, M>,
     inputs: &[TxInput],
     fee: Amount,
     flags: u32,
@@ -1067,7 +1183,7 @@ async fn test_bip125_max_replacements<
     T: GetTime + Send + std::marker::Sync,
     M: GetMemoryUsage + Send + std::marker::Sync,
 >(
-    mempool: &mut Mempool<ChainStateMock, T, M>,
+    mempool: &mut Mempool<T, M>,
     num_potential_replacements: usize,
 ) -> anyhow::Result<()> {
     let tx = TxGenerator::new()
@@ -1702,9 +1818,7 @@ async fn descendant_score() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn check_txs_sorted_by_descendant_sore(
-    mempool: &Mempool<ChainStateMock, SystemClock, SystemUsageEstimator>,
-) {
+fn check_txs_sorted_by_descendant_sore(mempool: &Mempool<SystemClock, SystemUsageEstimator>) {
     let txs_by_descendant_score =
         mempool.store.txs_by_descendant_score.values().flatten().collect::<Vec<_>>();
     for i in 0..(txs_by_descendant_score.len() - 1) {

@@ -13,8 +13,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
+use common::chain::OutPoint;
 use common::chain::Transaction;
 use common::chain::TxInput;
 use common::{
@@ -55,5 +57,7 @@ mockall::mock! {
             headers: Vec<BlockHeader>,
         ) -> Result<Vec<BlockHeader>, ChainstateError>;
         fn available_inputs(&self, tx: &Transaction) -> Vec<TxInput>;
+        fn get_outpoint_value(&self, outpoint: &common::chain::OutPoint) -> Result<common::primitives::Amount, ChainstateError>;
+        fn confirmed_outpoints(&self) -> Result<BTreeSet<OutPoint>, ChainstateError>;
     }
 }

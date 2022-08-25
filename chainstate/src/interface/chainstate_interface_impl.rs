@@ -13,9 +13,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::BTreeSet;
+
 use chainstate_storage::BlockchainStorage;
+use common::chain::OutPoint;
 use common::chain::Transaction;
 use common::chain::TxInput;
+use common::primitives::Amount;
 use common::{
     chain::block::{Block, BlockHeader, GenBlock},
     primitives::{BlockHeight, Id},
@@ -122,5 +126,16 @@ impl<S: BlockchainStorage> ChainstateInterface for ChainstateInterfaceImpl<S> {
 
     fn available_inputs(&self, _tx: &Transaction) -> Vec<TxInput> {
         vec![]
+    }
+
+    fn get_outpoint_value(
+        &self,
+        _outpoint: &common::chain::OutPoint,
+    ) -> Result<common::primitives::Amount, ChainstateError> {
+        Ok(Amount::from_atoms(0))
+    }
+
+    fn confirmed_outpoints(&self) -> Result<BTreeSet<OutPoint>, ChainstateError> {
+        Ok(BTreeSet::new())
     }
 }
