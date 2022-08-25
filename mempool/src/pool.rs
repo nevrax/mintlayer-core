@@ -294,25 +294,25 @@ where
 
     async fn verify_inputs_available(&self, tx: &Transaction) -> Result<(), TxValidationError> {
         let tx_clone = tx.clone();
-        let _chainstate_inputs =
-            self.chainstate_handle.call(move |this| this.available_inputs(&tx_clone)).await;
+        let chainstate_inputs = self
+            .chainstate_handle
+            .call(move |this| this.available_inputs(&tx_clone))
+            .await?;
         tx.inputs()
             .iter()
-            .map(TxInput::outpoint)
-            .find(|outpoint| !self.outpoint_available(outpoint))
+            .find(|input| {
+                !chainstate_inputs.contains(*input)
+                    && !self.store.contains_outpoint(input.outpoint())
+            })
             .map_or_else(
                 || Ok(()),
-                |outpoint| {
+                |input| {
                     Err(TxValidationError::OutPointNotFound {
-                        outpoint: outpoint.clone(),
+                        outpoint: input.outpoint().clone(),
                         tx_id: tx.get_id(),
                     })
                 },
             )
-    }
-
-    fn outpoint_available(&self, outpoint: &OutPoint) -> bool {
-        self.store.contains_outpoint(outpoint) || self.chain_state.contains_outpoint(outpoint)
     }
 
     fn create_entry(&self, tx: Transaction) -> Result<TxMempoolEntry, TxValidationError> {
