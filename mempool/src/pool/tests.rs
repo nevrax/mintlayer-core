@@ -16,6 +16,9 @@
 use super::*;
 use chainstate::make_chainstate;
 use chainstate::ChainstateConfig;
+use common::chain::block::timestamp::BlockTimestamp;
+use common::chain::block::BlockReward;
+use common::chain::block::ConsensusData;
 use common::chain::config::ChainConfig;
 use common::chain::signature::inputsig::InputWitness;
 use common::chain::transaction::{Destination, TxInput, TxOutput};
@@ -92,7 +95,7 @@ impl TxMempoolEntry {
         let id = self.tx.get_id();
         std::iter::repeat(id)
             .zip(self.tx.outputs().iter().enumerate())
-            .map(|(id, (index, output))| make_outpoint(&id, index as u32))
+            .map(|(id, (index, _output))| make_outpoint(&id, index as u32))
             .collect()
     }
 }
@@ -159,58 +162,6 @@ pub(crate) struct ChainStateMock {
     available_outpoints: BTreeSet<OutPoint>,
 }
 
-impl ChainStateMock {
-    pub(crate) fn new() -> Self {
-        let genesis_tx = create_genesis_tx();
-        let outpoint_source_id = OutPointSourceId::Transaction(genesis_tx.get_id());
-        let outpoints = genesis_tx
-            .outputs()
-            .iter()
-            .enumerate()
-            .map(|(index, _)| OutPoint::new(outpoint_source_id.clone(), index as u32))
-            .collect();
-        Self {
-            confirmed_txs: std::iter::once((genesis_tx.get_id().get(), genesis_tx)).collect(),
-            available_outpoints: outpoints,
-        }
-    }
-
-    fn confirmed_outpoints(&self) -> BTreeSet<OutPoint> {
-        self.available_outpoints
-            .iter()
-            .map(|outpoint| {
-                let tx_id = outpoint
-                    .tx_id()
-                    .get_tx_id()
-                    .cloned()
-                    .expect("Outpoints in these tests are created from TXs");
-                let index = outpoint.output_index();
-                let tx = self.confirmed_txs.get(&tx_id.get()).expect("Inconsistent Chain State");
-                let output = tx
-                    .outputs()
-                    .get(index as usize)
-                    .expect("Inconsistent Chain State: output not found");
-
-                make_outpoint(&tx_id, index)
-            })
-            .collect()
-    }
-
-    fn add_confirmed_tx(&mut self, tx: Transaction) {
-        let outpoints_spent: BTreeSet<_> =
-            tx.inputs().iter().map(|input| input.outpoint()).collect();
-        let outpoints_created: BTreeSet<_> = tx
-            .outputs()
-            .iter()
-            .enumerate()
-            .map(|(i, _)| OutPoint::new(OutPointSourceId::Transaction(tx.get_id()), i as u32))
-            .collect();
-        self.available_outpoints.extend(outpoints_created);
-        self.available_outpoints.retain(|outpoint| !outpoints_spent.contains(outpoint));
-        self.confirmed_txs.insert(tx.get_id().get(), tx);
-    }
-}
-
 use chainstate::PropertyQueryError;
 use chainstate::{BlockSource, ChainstateError, ChainstateEvent, Locator};
 use common::{
@@ -221,24 +172,28 @@ use common::{
     primitives::{BlockHeight, Id},
 };
 impl ChainstateInterface for ChainStateMock {
-    fn subscribe_to_events(&mut self, handler: Arc<dyn Fn(ChainstateEvent) + Send + Sync>) {
+    fn subscribe_to_events(&mut self, _handler: Arc<dyn Fn(ChainstateEvent) + Send + Sync>) {
         unimplemented!()
     }
-    fn process_block(&mut self, block: Block, source: BlockSource) -> Result<(), ChainstateError> {
+    fn process_block(
+        &mut self,
+        _block: Block,
+        _source: BlockSource,
+    ) -> Result<(), ChainstateError> {
         unimplemented!()
     }
-    fn preliminary_block_check(&self, block: Block) -> Result<Block, ChainstateError> {
+    fn preliminary_block_check(&self, _block: Block) -> Result<Block, ChainstateError> {
         unimplemented!()
     }
     fn get_best_block_id(&self) -> Result<Id<GenBlock>, ChainstateError> {
         unimplemented!()
     }
-    fn is_block_in_main_chain(&self, block_id: &Id<Block>) -> Result<bool, ChainstateError> {
+    fn is_block_in_main_chain(&self, _block_id: &Id<Block>) -> Result<bool, ChainstateError> {
         unimplemented!()
     }
     fn get_block_height_in_main_chain(
         &self,
-        block_id: &Id<GenBlock>,
+        _block_id: &Id<GenBlock>,
     ) -> Result<Option<BlockHeight>, ChainstateError> {
         unimplemented!()
     }
@@ -247,11 +202,11 @@ impl ChainstateInterface for ChainStateMock {
     }
     fn get_block_id_from_height(
         &self,
-        height: &BlockHeight,
+        _height: &BlockHeight,
     ) -> Result<Option<Id<GenBlock>>, ChainstateError> {
         unimplemented!()
     }
-    fn get_block(&self, block_id: Id<Block>) -> Result<Option<Block>, ChainstateError> {
+    fn get_block(&self, _block_id: Id<Block>) -> Result<Option<Block>, ChainstateError> {
         unimplemented!()
     }
 
@@ -269,14 +224,14 @@ impl ChainstateInterface for ChainStateMock {
     ///
     /// The number of returned headers is limited by the `HEADER_LIMIT` constant. The genesis block
     /// header is returned in case there is no common ancestor with a better block height.
-    fn get_headers(&self, locator: Locator) -> Result<Vec<BlockHeader>, ChainstateError> {
+    fn get_headers(&self, _locator: Locator) -> Result<Vec<BlockHeader>, ChainstateError> {
         unimplemented!()
     }
 
     /// Removes all headers that are already known to the chain from the given vector.
     fn filter_already_existing_blocks(
         &self,
-        headers: Vec<BlockHeader>,
+        _headers: Vec<BlockHeader>,
     ) -> Result<Vec<BlockHeader>, ChainstateError> {
         unimplemented!()
     }
@@ -323,12 +278,6 @@ impl ChainstateInterface for ChainStateMock {
                     .cloned()
                     .expect("Outpoints in these tests are created from TXs");
                 let index = outpoint.output_index();
-                let tx = self.confirmed_txs.get(&tx_id.get()).expect("Inconsistent Chain State");
-                let output = tx
-                    .outputs()
-                    .get(index as usize)
-                    .expect("Inconsistent Chain State: output not found");
-
                 make_outpoint(&tx_id, index)
             })
             .collect())
@@ -1409,7 +1358,7 @@ impl GetTime for MockClock {
 async fn only_expired_entries_removed() -> anyhow::Result<()> {
     let mock_clock = MockClock::new();
     let config = Arc::new(common::chain::config::create_unit_test_config());
-    let chainstate_interface = start_chainstate(config).await;
+    let chainstate_interface = start_chainstate(Arc::clone(&config)).await;
 
     let mut mempool = Mempool::new(
         config,
@@ -1467,7 +1416,19 @@ async fn only_expired_entries_removed() -> anyhow::Result<()> {
     // We have to do this because if we leave this parent in the mempool then it will be
     // expired, and so removed along with both its children, and thus the addition of child_1 to
     // the mempool will fail
-    mempool.process_block(&parent_id)?;
+    let block = Block::new(
+        vec![],
+        Id::new(H256::zero()),
+        BlockTimestamp::from_int_seconds(0),
+        ConsensusData::None,
+        BlockReward::new(vec![]),
+    )
+    .map_err(|_| anyhow::Error::msg("block creation error"))?;
+
+    mempool
+        .chainstate_handle
+        .call_mut(|this| this.process_block(block, BlockSource::Local))
+        .await??;
     mock_clock.set(DEFAULT_MEMPOOL_EXPIRY + Duration::new(1, 0));
 
     mempool.add_transaction(child_1).await?;
@@ -1493,7 +1454,6 @@ async fn rolling_fee() -> anyhow::Result<()> {
     // After removing one entry, cause the code to exit the loop by showing a small usage
     mock_usage.expect_get_memory_usage().return_const(0usize);
 
-    let chain_state = ChainStateMock::new();
     let config = Arc::new(common::chain::config::create_unit_test_config());
     let chainstate_interface = start_chainstate(config.clone()).await;
 
@@ -1625,8 +1585,19 @@ async fn rolling_fee() -> anyhow::Result<()> {
     mempool.add_transaction(child_2_high_fee).await?;
 
     // We simulate a block being accepted so the rolling fee will begin to decay
-    mempool.process_block(&parent_id)?;
+    let block = Block::new(
+        vec![],
+        Id::new(H256::zero()),
+        BlockTimestamp::from_int_seconds(0),
+        ConsensusData::None,
+        BlockReward::new(vec![]),
+    )
+    .map_err(|_| anyhow::Error::msg("block creation error"))?;
 
+    mempool
+        .chainstate_handle
+        .call_mut(|this| this.process_block(block, BlockSource::Local))
+        .await??;
     // Because the rolling fee is only updated when we attempt to add a tx to the mempool
     // we need to submit a "dummy" tx to trigger these updates.
 
@@ -1842,7 +1813,7 @@ async fn descendant_of_expired_entry() -> anyhow::Result<()> {
     logging::init_logging::<&str>(None);
 
     let config = Arc::new(common::chain::config::create_unit_test_config());
-    let chainstate_interface = start_chainstate(config).await;
+    let chainstate_interface = start_chainstate(Arc::clone(&config)).await;
 
     let mut mempool = Mempool::new(
         config,
@@ -1903,9 +1874,8 @@ async fn mempool_full() -> anyhow::Result<()> {
         .times(1)
         .return_const(MAX_MEMPOOL_SIZE_BYTES + 1);
 
-    let chain_state = ChainStateMock::new();
     let config = Arc::new(common::chain::config::create_unit_test_config());
-    let chainstate_interface = start_chainstate(config).await;
+    let chainstate_interface = start_chainstate(Arc::clone(&config)).await;
 
     let mut mempool = Mempool::new(config, chainstate_interface, SystemClock, mock_usage);
 
