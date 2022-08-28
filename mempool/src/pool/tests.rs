@@ -529,9 +529,7 @@ fn get_relay_fee_from_tx_size(tx_size: usize) -> u128 {
 async fn add_single_tx() -> anyhow::Result<()> {
     let mut mempool = setup().await;
 
-    let genesis_tx = mempool.chain_config.genesis_block().expect("genesis tx not found");
-
-    let outpoint_source_id = OutPointSourceId::Transaction(genesis_tx.get_id());
+    let outpoint_source_id = mempool.chain_config.genesis_block_id().into();
 
     let flags = 0;
     let locktime = 0;
@@ -653,14 +651,7 @@ async fn tx_no_outputs() -> anyhow::Result<()> {
 async fn tx_duplicate_inputs() -> anyhow::Result<()> {
     let mut mempool = setup().await;
 
-    let genesis_tx = mempool
-        .chainstate_handle
-        .confirmed_txs()
-        .values()
-        .next()
-        .expect("genesis tx not found");
-
-    let outpoint_source_id = OutPointSourceId::Transaction(genesis_tx.get_id());
+    let outpoint_source_id = OutPointSourceId::from(mempool.chain_config.genesis_block_id());
     let input = TxInput::new(
         outpoint_source_id.clone(),
         0,
@@ -693,14 +684,7 @@ async fn tx_duplicate_inputs() -> anyhow::Result<()> {
 async fn tx_already_in_mempool() -> anyhow::Result<()> {
     let mut mempool = setup().await;
 
-    let genesis_tx = mempool
-        .chainstate_handle
-        .confirmed_txs()
-        .values()
-        .next()
-        .expect("genesis tx not found");
-
-    let outpoint_source_id = OutPointSourceId::Transaction(genesis_tx.get_id());
+    let outpoint_source_id = OutPointSourceId::from(mempool.chain_config.genesis_block_id());
     let input = TxInput::new(
         outpoint_source_id,
         0,
@@ -726,14 +710,7 @@ async fn tx_already_in_mempool() -> anyhow::Result<()> {
 async fn outpoint_not_found() -> anyhow::Result<()> {
     let mut mempool = setup().await;
 
-    let genesis_tx = mempool
-        .chainstate_handle
-        .confirmed_txs()
-        .values()
-        .next()
-        .expect("genesis tx not found");
-
-    let outpoint_source_id = OutPointSourceId::Transaction(genesis_tx.get_id());
+    let outpoint_source_id = OutPointSourceId::from(mempool.chain_config.genesis_block_id());
 
     let good_input = TxInput::new(
         outpoint_source_id.clone(),
