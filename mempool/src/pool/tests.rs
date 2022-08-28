@@ -73,23 +73,6 @@ fn valued_outpoint(
     ValuedOutPoint { outpoint, value }
 }
 
-pub(crate) fn create_genesis_tx() -> Transaction {
-    const TOTAL_SUPPLY: u128 = 10_000_000_000_000;
-    let genesis_message = b"".to_vec();
-    let outpoint_source_id = OutPointSourceId::Transaction(Id::new(H256::zero()));
-    let input = TxInput::new(
-        outpoint_source_id,
-        0,
-        InputWitness::NoSignature(Some(genesis_message)),
-    );
-    let output = TxOutput::new(
-        OutputValue::Coin(Amount::from_atoms(TOTAL_SUPPLY)),
-        OutputPurpose::Transfer(Destination::AnyoneCanSpend),
-    );
-    Transaction::new(0, vec![input], vec![output], 0)
-        .expect("Failed to create genesis coinbase transaction")
-}
-
 impl TxMempoolEntry {
     fn outpoints_created(&self) -> BTreeSet<OutPoint> {
         let id = self.tx.get_id();
@@ -133,6 +116,7 @@ where
         if !allow_double_spend {
             available.retain(|outpoint| !self.store.spender_txs.contains_key(outpoint));
         }
+        eprintln!("available_outpoints are {:?}", available);
         Ok(available)
     }
 
@@ -250,17 +234,15 @@ impl ChainstateInterface for ChainStateMock {
     ) -> Result<Amount, chainstate::ChainstateError> {
         self.confirmed_txs
             .get(&outpoint.tx_id().get_tx_id().expect("Not coinbase").get())
-            .ok_or_else(|| {
-                chainstate::ChainstateError::FailedToReadProperty(PropertyQueryError::TxNotFound)
-            })
+            .ok_or(chainstate::ChainstateError::FailedToReadProperty(
+                PropertyQueryError::TxNotFound,
+            ))
             .and_then(|tx| {
                 tx.outputs()
                     .get(outpoint.output_index() as usize)
-                    .ok_or_else(|| {
-                        chainstate::ChainstateError::FailedToReadProperty(
-                            PropertyQueryError::OutpointNotFound,
-                        )
-                    })
+                    .ok_or(chainstate::ChainstateError::FailedToReadProperty(
+                        PropertyQueryError::OutpointNotFound,
+                    ))
                     .map(|output| match output.value() {
                         OutputValue::Coin(coin) => *coin,
                     })
@@ -488,7 +470,9 @@ async fn add_single_tx() -> anyhow::Result<()> {
         InputWitness::NoSignature(Some(DUMMY_WITNESS_MSG.to_vec())),
     );
     let relay_fee = Amount::from_atoms(get_relay_fee_from_tx_size(TX_SPEND_INPUT_SIZE));
+    eprintln!("1");
     let tx = tx_spend_input(&mempool, input, relay_fee, flags, locktime).await?;
+    eprintln!("2");
 
     let tx_clone = tx.clone();
     let tx_id = tx.get_id();
@@ -571,7 +555,7 @@ pub async fn start_chainstate(
 
 async fn setup() -> Mempool<SystemClock, SystemUsageEstimator> {
     let config = Arc::new(common::chain::config::create_unit_test_config());
-    let chainstate_interface = start_chainstate(config.clone()).await;
+    let chainstate_interface = start_chainstate(Arc::clone(&config)).await;
     Mempool::new(
         config,
         chainstate_interface,
@@ -1455,7 +1439,7 @@ async fn rolling_fee() -> anyhow::Result<()> {
     mock_usage.expect_get_memory_usage().return_const(0usize);
 
     let config = Arc::new(common::chain::config::create_unit_test_config());
-    let chainstate_interface = start_chainstate(config.clone()).await;
+    let chainstate_interface = start_chainstate(Arc::clone(&config)).await;
 
     let mut mempool = Mempool::new(config, chainstate_interface, mock_clock.clone(), mock_usage);
 
