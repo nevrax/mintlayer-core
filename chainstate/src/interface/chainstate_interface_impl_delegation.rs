@@ -94,7 +94,7 @@ impl<
         self.deref().filter_already_existing_blocks(headers)
     }
 
-    fn available_inputs(&self, tx: &Transaction) -> Vec<TxInput> {
+    fn available_inputs(&self, tx: &Transaction) -> Result<Vec<TxInput>, ChainstateError> {
         self.deref().available_inputs(tx)
     }
 

@@ -37,7 +37,7 @@ use common::{
     chain::{
         block::{BlockHeader, BlockReward},
         config::ChainConfig,
-        Block, GenBlock,
+        Block, GenBlock, OutPointSourceId, TxMainChainIndex,
     },
     primitives::{BlockDistance, BlockHeight, Id, Idable},
 };
@@ -335,6 +335,13 @@ impl<S: BlockchainStorage> Chainstate<S> {
 
     pub fn get_best_block_index(&self) -> Result<Option<GenBlockIndex>, PropertyQueryError> {
         self.make_db_tx_ro().get_best_block_index()
+    }
+
+    pub fn get_mainchain_tx_index(
+        &self,
+        tx_id: &OutPointSourceId,
+    ) -> Result<Option<TxMainChainIndex>, PropertyQueryError> {
+        self.make_db_tx_ro().get_mainchain_tx_index(tx_id)
     }
 
     fn locator_tip_distances() -> impl Iterator<Item = BlockDistance> {

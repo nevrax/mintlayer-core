@@ -16,6 +16,7 @@
 use std::collections::BTreeSet;
 
 use chainstate_storage::BlockchainStorage;
+use chainstate_storage::BlockchainStorageRead;
 use common::chain::OutPoint;
 use common::chain::Transaction;
 use common::chain::TxInput;
@@ -124,8 +125,16 @@ impl<S: BlockchainStorage> ChainstateInterface for ChainstateInterfaceImpl<S> {
         Ok(best_block_index.block_height())
     }
 
-    fn available_inputs(&self, _tx: &Transaction) -> Vec<TxInput> {
-        vec![]
+    fn available_inputs(&self, tx: &Transaction) -> Result<Vec<TxInput>, ChainstateError> {
+        let mut available_inputs = Vec::new();
+        for input in tx.inputs() {
+            let index = self
+                .chainstate
+                .get_mainchain_tx_index(&input.outpoint().tx_id())
+                .map_err(ChainstateError::FailedToReadProperty)?;
+            if let Some(index) = index {}
+        }
+        Ok(available_inputs)
     }
 
     fn get_outpoint_value(

@@ -67,7 +67,7 @@ pub trait ChainstateInterface: Send {
     ) -> Result<Vec<BlockHeader>, ChainstateError>;
 
     /// Returns all spendable inputs of a Transaction
-    fn available_inputs(&self, tx: &Transaction) -> Vec<TxInput>;
+    fn available_inputs(&self, tx: &Transaction) -> Result<Vec<TxInput>, ChainstateError>;
 
     /// Returns the value of a given OutPoint
     fn get_outpoint_value(&self, outpoint: &OutPoint) -> Result<Amount, ChainstateError>;
