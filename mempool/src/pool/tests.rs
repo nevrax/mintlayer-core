@@ -47,14 +47,27 @@ async fn real_size() -> anyhow::Result<()> {
     let tx = TxGenerator::new()
         .with_num_inputs(1)
         .with_num_outputs(400)
-        .generate_tx(&mempool)?;
+        .generate_tx(&mempool)
+        .await?;
     log::debug!("real size of tx {}", tx.encoded_size());
     Ok(())
 }
 
-fn valued_outpoint(tx_id: &Id<Transaction>, outpoint_index: u32, output: &TxOutput) -> OutPoint {
+fn make_outpoint(tx_id: &Id<Transaction>, outpoint_index: u32) -> OutPoint {
     let outpoint_source_id = OutPointSourceId::Transaction(*tx_id);
     OutPoint::new(outpoint_source_id, outpoint_index)
+}
+
+fn valued_outpoint(
+    tx_id: &Id<Transaction>,
+    outpoint_index: u32,
+    output: &TxOutput,
+) -> ValuedOutPoint {
+    let outpoint = make_outpoint(tx_id, outpoint_index);
+    let value = match output.value() {
+        OutputValue::Coin(coin) => *coin,
+    };
+    ValuedOutPoint { outpoint, value }
 }
 
 pub(crate) fn create_genesis_tx() -> Transaction {
@@ -79,7 +92,7 @@ impl TxMempoolEntry {
         let id = self.tx.get_id();
         std::iter::repeat(id)
             .zip(self.tx.outputs().iter().enumerate())
-            .map(|(id, (index, output))| valued_outpoint(&id, index as u32, output))
+            .map(|(id, (index, output))| make_outpoint(&id, index as u32))
             .collect()
     }
 }
@@ -137,11 +150,6 @@ where
 
     fn get_minimum_rolling_fee(&self) -> FeeRate {
         self.rolling_fee_rate.read().rolling_minimum_fee_rate
-    }
-
-    async fn process_block(&mut self, tx_id: &Id<Transaction>) -> anyhow::Result<()> {
-        self.chainstate_handle.call(|this| this.process_block(block, source)).await?;
-        Ok(())
     }
 }
 /*
@@ -205,7 +213,7 @@ impl ChainStateMock {
                     .get(index as usize)
                     .expect("Inconsistent Chain State: output not found");
 
-                valued_outpoint(&tx_id, index, output)
+                make_outpoint(&tx_id, index)
             })
             .collect()
     }
@@ -343,7 +351,7 @@ impl ChainstateInterface for ChainStateMock {
                     .get(index as usize)
                     .expect("Inconsistent Chain State: output not found");
 
-                valued_outpoint(&tx_id, index, output)
+                make_outpoint(&tx_id, index)
             })
             .collect())
     }
@@ -397,14 +405,22 @@ impl TxGenerator {
         }
     }
 
-    fn generate_tx<
+    async fn generate_tx<
         T: GetTime + Send + std::marker::Sync,
         M: GetMemoryUsage + Send + std::marker::Sync,
     >(
         &mut self,
         mempool: &Mempool<T, M>,
     ) -> anyhow::Result<Transaction> {
-        self.coin_pool = mempool.available_outpoints(self.allow_double_spend);
+        for outpoint in mempool.available_outpoints(self.allow_double_spend).await? {
+            self.coin_pool.insert(ValuedOutPoint {
+                outpoint: outpoint.clone(),
+                value: mempool
+                    .chainstate_handle
+                    .call(move |this| this.get_outpoint_value(&outpoint))
+                    .await??,
+            });
+        }
         let fee = if let Some(tx_fee) = self.tx_fee {
             tx_fee
         } else {
@@ -536,7 +552,7 @@ async fn add_single_tx() -> anyhow::Result<()> {
     let mut mempool = setup().await;
 
     let genesis_tx = mempool
-        .chain_state
+        .chainstate_handle
         .confirmed_txs()
         .values()
         .next()
@@ -552,7 +568,7 @@ async fn add_single_tx() -> anyhow::Result<()> {
         InputWitness::NoSignature(Some(DUMMY_WITNESS_MSG.to_vec())),
     );
     let relay_fee = Amount::from_atoms(get_relay_fee_from_tx_size(TX_SPEND_INPUT_SIZE));
-    let tx = tx_spend_input(&mempool, input, relay_fee, flags, locktime)?;
+    let tx = tx_spend_input(&mempool, input, relay_fee, flags, locktime).await?;
 
     let tx_clone = tx.clone();
     let tx_id = tx.get_id();
@@ -575,7 +591,7 @@ async fn txs_sorted() -> anyhow::Result<()> {
     let target_txs = 10;
 
     for _ in 0..target_txs {
-        match tx_generator.generate_tx(&mempool) {
+        match tx_generator.generate_tx(&mempool).await {
             Ok(tx) => {
                 mempool.add_transaction(tx.clone()).await?;
             }
@@ -583,11 +599,10 @@ async fn txs_sorted() -> anyhow::Result<()> {
         }
     }
 
-    let fees = mempool
-        .get_all()
-        .iter()
-        .map(|tx| mempool.try_get_fee(tx))
-        .collect::<Result<Vec<_>, _>>()?;
+    let mut fees = Vec::new();
+    for tx in mempool.get_all() {
+        fees.push(mempool.try_get_fee(tx).await?)
+    }
     let mut fees_sorted = fees.clone();
     fees_sorted.sort_by(|a, b| b.cmp(a));
     assert_eq!(fees, fees_sorted);
@@ -602,6 +617,7 @@ async fn tx_no_inputs() -> anyhow::Result<()> {
         .with_num_inputs(0)
         .with_fee(Amount::from_atoms(0))
         .generate_tx(&mempool)
+        .await
         .expect("generate_tx failed");
     assert!(matches!(
         mempool.add_transaction(tx).await,
@@ -649,6 +665,7 @@ async fn tx_no_outputs() -> anyhow::Result<()> {
     let tx = TxGenerator::new()
         .with_num_outputs(0)
         .generate_tx(&mempool)
+        .await
         .expect("generate_tx failed");
     assert!(matches!(
         mempool.add_transaction(tx).await,
@@ -663,7 +680,7 @@ async fn tx_duplicate_inputs() -> anyhow::Result<()> {
     let mut mempool = setup().await;
 
     let genesis_tx = mempool
-        .chain_state
+        .chainstate_handle
         .confirmed_txs()
         .values()
         .next()
@@ -683,7 +700,8 @@ async fn tx_duplicate_inputs() -> anyhow::Result<()> {
     );
     let flags = 0;
     let locktime = 0;
-    let outputs = tx_spend_input(&mempool, input.clone(), None, flags, locktime)?
+    let outputs = tx_spend_input(&mempool, input.clone(), None, flags, locktime)
+        .await?
         .outputs()
         .clone();
     let inputs = vec![input, duplicate_input];
@@ -702,7 +720,7 @@ async fn tx_already_in_mempool() -> anyhow::Result<()> {
     let mut mempool = setup().await;
 
     let genesis_tx = mempool
-        .chain_state
+        .chainstate_handle
         .confirmed_txs()
         .values()
         .next()
@@ -717,7 +735,7 @@ async fn tx_already_in_mempool() -> anyhow::Result<()> {
 
     let flags = 0;
     let locktime = 0;
-    let tx = tx_spend_input(&mempool, input, None, flags, locktime)?;
+    let tx = tx_spend_input(&mempool, input, None, flags, locktime).await?;
 
     mempool.add_transaction(tx.clone()).await?;
     assert!(matches!(
@@ -735,7 +753,7 @@ async fn outpoint_not_found() -> anyhow::Result<()> {
     let mut mempool = setup().await;
 
     let genesis_tx = mempool
-        .chain_state
+        .chainstate_handle
         .confirmed_txs()
         .values()
         .next()
@@ -750,7 +768,10 @@ async fn outpoint_not_found() -> anyhow::Result<()> {
     );
     let flags = 0;
     let locktime = 0;
-    let outputs = tx_spend_input(&mempool, good_input, None, flags, locktime)?.outputs().clone();
+    let outputs = tx_spend_input(&mempool, good_input, None, flags, locktime)
+        .await?
+        .outputs()
+        .clone();
 
     let bad_outpoint_index = 1;
     let bad_input = TxInput::new(
@@ -785,6 +806,7 @@ async fn tx_too_big() -> anyhow::Result<()> {
     let tx = TxGenerator::new()
         .with_num_outputs(too_many_outputs)
         .generate_tx(&mempool)
+        .await
         .expect("generate_tx failed");
     assert!(matches!(
         mempool.add_transaction(tx).await,
@@ -823,6 +845,7 @@ async fn test_replace_tx(original_fee: Amount, replacement_fee: Amount) -> Resul
     let flags = 1;
     let locktime = 0;
     let original = tx_spend_input(&mempool, input.clone(), original_fee, flags, locktime)
+        .await
         .expect("should be able to spend here");
     let original_id = original.get_id();
     log::debug!(
@@ -833,6 +856,7 @@ async fn test_replace_tx(original_fee: Amount, replacement_fee: Amount) -> Resul
 
     let flags = 0;
     let replacement = tx_spend_input(&mempool, input, replacement_fee, flags, locktime)
+        .await
         .expect("should be able to spend here");
     log::debug!(
         "created a replacement with fee {:?}",
@@ -869,6 +893,7 @@ async fn try_replace_irreplaceable() -> anyhow::Result<()> {
     let locktime = 0;
     let original_fee = Amount::from_atoms(get_relay_fee_from_tx_size(TX_SPEND_INPUT_SIZE));
     let original = tx_spend_input(&mempool, input.clone(), original_fee, flags, locktime)
+        .await
         .expect("should be able to spend here");
     let original_id = original.get_id();
     mempool.add_transaction(original).await?;
@@ -876,6 +901,7 @@ async fn try_replace_irreplaceable() -> anyhow::Result<()> {
     let flags = 0;
     let replacement_fee = (original_fee + Amount::from_atoms(1000)).unwrap();
     let replacement = tx_spend_input(&mempool, input, replacement_fee, flags, locktime)
+        .await
         .expect("should be able to spend here");
     assert!(matches!(
         mempool.add_transaction(replacement.clone()).await,
@@ -926,6 +952,7 @@ async fn tx_replace_child() -> anyhow::Result<()> {
     let tx = TxGenerator::new()
         .replaceable()
         .generate_tx(&mempool)
+        .await
         .expect("generate_replaceable_tx");
     mempool.add_transaction(tx.clone()).await?;
 
@@ -945,13 +972,14 @@ async fn tx_replace_child() -> anyhow::Result<()> {
         Amount::from_atoms(100),
         flags,
         locktime,
-    )?;
+    )
+    .await?;
     mempool.add_transaction(child_tx).await?;
 
     let relay_fee = get_relay_fee_from_tx_size(TX_SPEND_INPUT_SIZE);
     let replacement_fee = Amount::from_atoms(relay_fee + 100);
     let replacement_tx =
-        tx_spend_input(&mempool, child_tx_input, replacement_fee, flags, locktime)?;
+        tx_spend_input(&mempool, child_tx_input, replacement_fee, flags, locktime).await?;
     mempool.add_transaction(replacement_tx).await?;
     mempool.store.assert_valid();
     Ok(())
@@ -960,7 +988,7 @@ async fn tx_replace_child() -> anyhow::Result<()> {
 // To test our validation of BIP125 Rule#4 (replacement transaction pays for its own bandwidth), we need to know the necessary relay fee before creating the transaction. The relay fee depends on the size of the transaction. The usual way to get the size of a transaction is to call `tx.encoded_size` but we cannot do this until we have created the transaction itself. To get around this cycle, we have precomputed the size of all transaction created by `tx_spend_input`. This value will be the same for all transactions created by this function.
 const TX_SPEND_INPUT_SIZE: usize = 213;
 
-fn tx_spend_input<
+async fn tx_spend_input<
     T: GetTime + Send + std::marker::Sync,
     M: GetMemoryUsage + Send + std::marker::Sync,
 >(
@@ -974,10 +1002,10 @@ fn tx_spend_input<
         || Amount::from_atoms(get_relay_fee_from_tx_size(estimate_tx_size(1, 2))),
         std::convert::identity,
     );
-    tx_spend_several_inputs(mempool, &[input], fee, flags, locktime)
+    tx_spend_several_inputs(mempool, &[input], fee, flags, locktime).await
 }
 
-fn tx_spend_several_inputs<
+async fn tx_spend_several_inputs<
     T: GetTime + Send + std::marker::Sync,
     M: GetMemoryUsage + Send + std::marker::Sync,
 >(
@@ -987,17 +1015,15 @@ fn tx_spend_several_inputs<
     flags: u32,
     locktime: u32,
 ) -> anyhow::Result<Transaction> {
-    let input_value = inputs
-        .iter()
-        .map(|input| mempool.get_input_value(input))
-        .collect::<Result<Vec<_>, _>>()?
-        .into_iter()
-        .sum::<Option<_>>()
-        .ok_or_else(|| {
-            let msg = String::from("tx_spend_input: overflow");
-            log::error!("{}", msg);
-            anyhow::Error::msg(msg)
-        })?;
+    let mut input_values = Vec::new();
+    for input in inputs {
+        input_values.push(mempool.get_input_value(input).await?)
+    }
+    let input_value = input_values.into_iter().sum::<Option<_>>().ok_or_else(|| {
+        let msg = String::from("tx_spend_input: overflow");
+        log::error!("{}", msg);
+        anyhow::Error::msg(msg)
+    })?;
 
     let available_for_spending = (input_value - fee).ok_or_else(|| {
         let msg = format!(
@@ -1038,6 +1064,7 @@ async fn one_ancestor_replaceability_signal_is_enough() -> anyhow::Result<()> {
     let tx = TxGenerator::new()
         .with_num_outputs(2)
         .generate_tx(&mempool)
+        .await
         .expect("generate_replaceable_tx");
 
     mempool.add_transaction(tx.clone()).await?;
@@ -1057,7 +1084,8 @@ async fn one_ancestor_replaceability_signal_is_enough() -> anyhow::Result<()> {
         None,
         flags_replaceable,
         locktime,
-    )?;
+    )
+    .await?;
 
     let ancestor_without_signal = tx_spend_input(
         &mempool,
@@ -1069,7 +1097,8 @@ async fn one_ancestor_replaceability_signal_is_enough() -> anyhow::Result<()> {
         None,
         flags_irreplaceable,
         locktime,
-    )?;
+    )
+    .await?;
 
     mempool.add_transaction(ancestor_with_signal.clone()).await?;
     mempool.add_transaction(ancestor_without_signal.clone()).await?;
@@ -1098,7 +1127,8 @@ async fn one_ancestor_replaceability_signal_is_enough() -> anyhow::Result<()> {
         original_fee,
         flags_irreplaceable,
         locktime,
-    )?;
+    )
+    .await?;
     let replaced_tx_id = replaced_tx.get_id();
 
     mempool.add_transaction(replaced_tx).await?;
@@ -1190,6 +1220,7 @@ async fn test_bip125_max_replacements<
         .with_num_outputs(num_potential_replacements - 1)
         .replaceable()
         .generate_tx(mempool)
+        .await
         .expect("generate_tx failed");
     let input = tx.inputs().first().expect("one input").clone();
     let outputs = tx.outputs().clone();
@@ -1206,13 +1237,13 @@ async fn test_bip125_max_replacements<
             index.try_into().unwrap(),
             InputWitness::NoSignature(Some(DUMMY_WITNESS_MSG.to_vec())),
         );
-        let tx = tx_spend_input(mempool, input, Amount::from_atoms(fee), flags, locktime)?;
+        let tx = tx_spend_input(mempool, input, Amount::from_atoms(fee), flags, locktime).await?;
         mempool.add_transaction(tx).await?;
     }
     let mempool_size_before_replacement = mempool.store.txs_by_id.len();
 
     let replacement_fee = Amount::from_atoms(1000) * fee;
-    let replacement_tx = tx_spend_input(mempool, input, replacement_fee, flags, locktime)?;
+    let replacement_tx = tx_spend_input(mempool, input, replacement_fee, flags, locktime).await?;
     mempool.add_transaction(replacement_tx).await?;
     let mempool_size_after_replacement = mempool.store.txs_by_id.len();
 
@@ -1254,6 +1285,7 @@ async fn spends_new_unconfirmed() -> anyhow::Result<()> {
         .with_num_outputs(2)
         .replaceable()
         .generate_tx(&mempool)
+        .await
         .expect("generate_replaceable_tx");
     let outpoint_source_id = OutPointSourceId::Transaction(tx.get_id());
     mempool.add_transaction(tx).await?;
@@ -1272,7 +1304,8 @@ async fn spends_new_unconfirmed() -> anyhow::Result<()> {
     let locktime = 0;
     let flags = 0;
     let original_fee = Amount::from_atoms(100);
-    let replaced_tx = tx_spend_input(&mempool, input1.clone(), original_fee, flags, locktime)?;
+    let replaced_tx =
+        tx_spend_input(&mempool, input1.clone(), original_fee, flags, locktime).await?;
     mempool.add_transaction(replaced_tx).await?;
     let relay_fee = get_relay_fee_from_tx_size(TX_SPEND_INPUT_SIZE);
     let replacement_fee = Amount::from_atoms(100 + relay_fee);
@@ -1282,7 +1315,8 @@ async fn spends_new_unconfirmed() -> anyhow::Result<()> {
         replacement_fee,
         flags,
         locktime,
-    )?;
+    )
+    .await?;
 
     let res = mempool.add_transaction(incoming_tx).await;
     assert!(matches!(
@@ -1298,7 +1332,7 @@ async fn spends_new_unconfirmed() -> anyhow::Result<()> {
 #[tokio::test]
 async fn pays_more_than_conflicts_with_descendants() -> anyhow::Result<()> {
     let mut mempool = setup().await;
-    let tx = TxGenerator::new().generate_tx(&mempool).expect("generate_replaceable_tx");
+    let tx = TxGenerator::new().generate_tx(&mempool).await.expect("generate_replaceable_tx");
     let tx_id = tx.get_id();
     mempool.add_transaction(tx).await?;
 
@@ -1315,8 +1349,8 @@ async fn pays_more_than_conflicts_with_descendants() -> anyhow::Result<()> {
 
     // Create transaction that we will attempt to replace
     let original_fee = Amount::from_atoms(100);
-    let replaced_tx = tx_spend_input(&mempool, input.clone(), original_fee, rbf, locktime)?;
-    let replaced_tx_fee = mempool.try_get_fee(&replaced_tx)?;
+    let replaced_tx = tx_spend_input(&mempool, input.clone(), original_fee, rbf, locktime).await?;
+    let replaced_tx_fee = mempool.try_get_fee(&replaced_tx).await?;
     let replaced_id = replaced_tx.get_id();
     mempool.add_transaction(replaced_tx).await?;
 
@@ -1334,7 +1368,8 @@ async fn pays_more_than_conflicts_with_descendants() -> anyhow::Result<()> {
         descendant1_fee,
         no_rbf,
         locktime,
-    )?;
+    )
+    .await?;
     let descendant1_id = descendant1.get_id();
     mempool.add_transaction(descendant1).await?;
 
@@ -1349,7 +1384,8 @@ async fn pays_more_than_conflicts_with_descendants() -> anyhow::Result<()> {
         descendant2_fee,
         no_rbf,
         locktime,
-    )?;
+    )
+    .await?;
     let descendant2_id = descendant2.get_id();
     mempool.add_transaction(descendant2).await?;
 
@@ -1366,7 +1402,8 @@ async fn pays_more_than_conflicts_with_descendants() -> anyhow::Result<()> {
         insufficient_rbf_fee,
         no_rbf,
         locktime,
-    )?;
+    )
+    .await?;
 
     assert!(matches!(
         mempool.add_transaction(incoming_tx).await,
@@ -1377,7 +1414,7 @@ async fn pays_more_than_conflicts_with_descendants() -> anyhow::Result<()> {
 
     let relay_fee = get_relay_fee_from_tx_size(TX_SPEND_INPUT_SIZE);
     let sufficient_rbf_fee = insufficient_rbf_fee + Amount::from_atoms(relay_fee);
-    let incoming_tx = tx_spend_input(&mempool, input, sufficient_rbf_fee, no_rbf, locktime)?;
+    let incoming_tx = tx_spend_input(&mempool, input, sufficient_rbf_fee, no_rbf, locktime).await?;
     mempool.add_transaction(incoming_tx).await?;
 
     assert!(!mempool.contains_transaction(&replaced_id));
@@ -1424,7 +1461,6 @@ async fn only_expired_entries_removed() -> anyhow::Result<()> {
     let chainstate_interface = start_chainstate(config).await;
 
     let mut mempool = Mempool::new(
-        ChainStateMock::new(),
         chainstate_interface,
         mock_clock.clone(),
         SystemUsageEstimator {},
@@ -1437,7 +1473,8 @@ async fn only_expired_entries_removed() -> anyhow::Result<()> {
         .with_num_inputs(num_inputs)
         .with_num_outputs(num_outputs)
         .with_fee(Amount::from_atoms(big_fee))
-        .generate_tx(&mempool)?;
+        .generate_tx(&mempool)
+        .await?;
     let parent_id = parent.get_id();
     mempool.add_transaction(parent).await?;
 
@@ -1454,7 +1491,8 @@ async fn only_expired_entries_removed() -> anyhow::Result<()> {
         None,
         flags,
         locktime,
-    )?;
+    )
+    .await?;
 
     let child_1 = tx_spend_input(
         &mempool,
@@ -1466,7 +1504,8 @@ async fn only_expired_entries_removed() -> anyhow::Result<()> {
         None,
         flags,
         locktime,
-    )?;
+    )
+    .await?;
     let child_1_id = child_1.get_id();
 
     let expired_tx_id = child_0.get_id();
@@ -1506,12 +1545,7 @@ async fn rolling_fee() -> anyhow::Result<()> {
     let config = Arc::new(common::chain::config::create_unit_test_config());
     let chainstate_interface = start_chainstate(config).await;
 
-    let mut mempool = Mempool::new(
-        chain_state,
-        chainstate_interface,
-        mock_clock.clone(),
-        mock_usage,
-    );
+    let mut mempool = Mempool::new(chainstate_interface, mock_clock.clone(), mock_usage);
 
     let num_inputs = 1;
     let num_outputs = 3;
@@ -1521,7 +1555,8 @@ async fn rolling_fee() -> anyhow::Result<()> {
     let parent = TxGenerator::new()
         .with_num_inputs(num_inputs)
         .with_num_outputs(num_outputs)
-        .generate_tx(&mempool)?;
+        .generate_tx(&mempool)
+        .await?;
     let parent_id = parent.get_id();
     log::debug!("parent_id: {}", parent_id.get());
     log::debug!("before adding parent");
@@ -1543,7 +1578,8 @@ async fn rolling_fee() -> anyhow::Result<()> {
         None,
         flags,
         locktime,
-    )?;
+    )
+    .await?;
     let child_0_id = child_0.get_id();
     log::debug!("child_0_id {}", child_0_id.get());
 
@@ -1560,7 +1596,8 @@ async fn rolling_fee() -> anyhow::Result<()> {
         big_fee,
         flags,
         locktime,
-    )?;
+    )
+    .await?;
     let child_1_id = child_1.get_id();
     log::debug!("child_1_id {}", child_1_id.get());
     mempool.add_transaction(child_0.clone()).await?;
@@ -1572,7 +1609,7 @@ async fn rolling_fee() -> anyhow::Result<()> {
     assert!(mempool.contains_transaction(&child_1_id));
     assert!(!mempool.contains_transaction(&child_0_id));
     let rolling_fee = mempool.get_minimum_rolling_fee();
-    let child_0_fee = mempool.try_get_fee(&child_0)?;
+    let child_0_fee = mempool.try_get_fee(&child_0).await?;
     log::debug!("FeeRate of child_0 {:?}", child_0_fee);
     assert_eq!(
         rolling_fee,
@@ -1586,7 +1623,7 @@ async fn rolling_fee() -> anyhow::Result<()> {
     );
     assert_eq!(
         rolling_fee,
-        FeeRate::from_total_tx_fee(mempool.try_get_fee(&child_0)?, child_0.encoded_size())
+        FeeRate::from_total_tx_fee(mempool.try_get_fee(&child_0).await?, child_0.encoded_size())
             + *INCREMENTAL_RELAY_FEE_RATE
     );
 
@@ -1602,10 +1639,11 @@ async fn rolling_fee() -> anyhow::Result<()> {
         None,
         flags,
         locktime,
-    )?;
+    )
+    .await?;
     log::debug!(
         "before child2: fee = {:?}, size = {}, minimum fee rate = {:?}",
-        mempool.try_get_fee(&child_2)?,
+        mempool.try_get_fee(&child_2).await?,
         child_2.encoded_size(),
         mempool.get_minimum_rolling_fee()
     );
@@ -1629,7 +1667,8 @@ async fn rolling_fee() -> anyhow::Result<()> {
         mempool.get_minimum_rolling_fee().compute_fee(estimate_tx_size(1, 1)),
         flags,
         locktime,
-    )?;
+    )
+    .await?;
     log::debug!("before child2_high_fee");
     mempool.add_transaction(child_2_high_fee).await?;
 
@@ -1646,10 +1685,13 @@ async fn rolling_fee() -> anyhow::Result<()> {
     // observer that it is set to zero
     let halflife = ROLLING_FEE_BASE_HALFLIFE / 4;
     mock_clock.increment(halflife);
-    let dummy_tx = TxGenerator::new().with_fee(Amount::from_atoms(100)).generate_tx(&mempool)?;
+    let dummy_tx = TxGenerator::new()
+        .with_fee(Amount::from_atoms(100))
+        .generate_tx(&mempool)
+        .await?;
     log::debug!(
         "First attempt to add dummy which pays a fee of {:?}",
-        mempool.try_get_fee(&dummy_tx)?
+        mempool.try_get_fee(&dummy_tx).await?
     );
     let res = mempool.add_transaction(dummy_tx.clone()).await;
 
@@ -1687,8 +1729,10 @@ async fn rolling_fee() -> anyhow::Result<()> {
 
     // Add another dummmy until rolling feerate drops to zero
     mock_clock.increment(halflife);
-    let another_dummy =
-        TxGenerator::new().with_fee(Amount::from_atoms(100)).generate_tx(&mempool)?;
+    let another_dummy = TxGenerator::new()
+        .with_fee(Amount::from_atoms(100))
+        .generate_tx(&mempool)
+        .await?;
     mempool.add_transaction(another_dummy).await?;
     assert_eq!(
         mempool.get_minimum_rolling_fee(),
@@ -1705,7 +1749,8 @@ async fn different_size_txs() -> anyhow::Result<()> {
     let initial_tx = TxGenerator::new()
         .with_num_inputs(1)
         .with_num_outputs(10_000)
-        .generate_tx(&mempool)?;
+        .generate_tx(&mempool)
+        .await?;
     mempool.add_transaction(initial_tx).await?;
 
     let target_txs = 100;
@@ -1715,7 +1760,8 @@ async fn different_size_txs() -> anyhow::Result<()> {
         let tx = TxGenerator::new()
             .with_num_inputs(num_inputs)
             .with_num_outputs(num_outputs)
-            .generate_tx(&mempool)?;
+            .generate_tx(&mempool)
+            .await?;
         mempool.add_transaction(tx).await?;
     }
 
@@ -1729,6 +1775,7 @@ async fn descendant_score() -> anyhow::Result<()> {
     let tx = TxGenerator::new()
         .with_num_outputs(2)
         .generate_tx(&mempool)
+        .await
         .expect("generate_replaceable_tx");
     let tx_id = tx.get_id();
     mempool.add_transaction(tx).await?;
@@ -1751,10 +1798,11 @@ async fn descendant_score() -> anyhow::Result<()> {
         tx_a_fee,
         flags,
         locktime,
-    )?;
+    )
+    .await?;
     let tx_a_id = tx_a.get_id();
     log::debug!("tx_a_id : {}", tx_a_id.get());
-    log::debug!("tx_a fee : {:?}", mempool.try_get_fee(&tx_a)?);
+    log::debug!("tx_a fee : {:?}", mempool.try_get_fee(&tx_a).await?);
     mempool.add_transaction(tx_a).await?;
 
     let tx_b = tx_spend_input(
@@ -1767,10 +1815,11 @@ async fn descendant_score() -> anyhow::Result<()> {
         tx_b_fee,
         flags,
         locktime,
-    )?;
+    )
+    .await?;
     let tx_b_id = tx_b.get_id();
     log::debug!("tx_b_id : {}", tx_b_id.get());
-    log::debug!("tx_b fee : {:?}", mempool.try_get_fee(&tx_b)?);
+    log::debug!("tx_b fee : {:?}", mempool.try_get_fee(&tx_b).await?);
     mempool.add_transaction(tx_b).await?;
 
     let tx_c = tx_spend_input(
@@ -1783,10 +1832,11 @@ async fn descendant_score() -> anyhow::Result<()> {
         tx_c_fee,
         flags,
         locktime,
-    )?;
+    )
+    .await?;
     let tx_c_id = tx_c.get_id();
     log::debug!("tx_c_id : {}", tx_c_id.get());
-    log::debug!("tx_c fee : {:?}", mempool.try_get_fee(&tx_c)?);
+    log::debug!("tx_c fee : {:?}", mempool.try_get_fee(&tx_c).await?);
     mempool.add_transaction(tx_c).await?;
 
     let entry_a = mempool.store.txs_by_id.get(&tx_a_id.get()).expect("tx_a");
@@ -1843,7 +1893,6 @@ async fn descendant_of_expired_entry() -> anyhow::Result<()> {
     let chainstate_interface = start_chainstate(config).await;
 
     let mut mempool = Mempool::new(
-        ChainStateMock::new(),
         chainstate_interface,
         mock_clock.clone(),
         SystemUsageEstimator {},
@@ -1856,7 +1905,8 @@ async fn descendant_of_expired_entry() -> anyhow::Result<()> {
         .with_num_inputs(num_inputs)
         .with_num_outputs(num_outputs)
         .with_fee(Amount::from_atoms(fee))
-        .generate_tx(&mempool)?;
+        .generate_tx(&mempool)
+        .await?;
     let parent_id = parent.get_id();
     mempool.add_transaction(parent).await?;
 
@@ -1873,7 +1923,8 @@ async fn descendant_of_expired_entry() -> anyhow::Result<()> {
         None,
         flags,
         locktime,
-    )?;
+    )
+    .await?;
     let child_id = child.get_id();
     mock_clock.set(DEFAULT_MEMPOOL_EXPIRY + Duration::new(1, 0));
 
@@ -1903,9 +1954,9 @@ async fn mempool_full() -> anyhow::Result<()> {
     let config = Arc::new(common::chain::config::create_unit_test_config());
     let chainstate_interface = start_chainstate(config).await;
 
-    let mut mempool = Mempool::new(chain_state, chainstate_interface, SystemClock, mock_usage);
+    let mut mempool = Mempool::new(chainstate_interface, SystemClock, mock_usage);
 
-    let tx = TxGenerator::new().generate_tx(&mempool)?;
+    let tx = TxGenerator::new().generate_tx(&mempool).await?;
     log::debug!("mempool_full: tx has is {}", tx.get_id().get());
     assert!(matches!(
         mempool.add_transaction(tx).await,
@@ -1926,7 +1977,8 @@ async fn no_empty_bags_in_descendant_score_index() -> anyhow::Result<()> {
         .with_num_inputs(num_inputs)
         .with_num_outputs(num_outputs)
         .with_fee(Amount::from_atoms(fee))
-        .generate_tx(&mempool)?;
+        .generate_tx(&mempool)
+        .await?;
     let parent_id = parent.get_id();
 
     let outpoint_source_id = OutPointSourceId::Transaction(parent.get_id());
@@ -1934,9 +1986,9 @@ async fn no_empty_bags_in_descendant_score_index() -> anyhow::Result<()> {
     let num_child_txs = num_outputs;
     let flags = 0;
     let locktime = 0;
-    let txs = (0..num_child_txs)
-        .into_iter()
-        .map(|i| {
+    let mut txs = Vec::new();
+    for i in 0..num_child_txs {
+        txs.push(
             tx_spend_input(
                 &mempool,
                 TxInput::new(
@@ -1948,8 +2000,9 @@ async fn no_empty_bags_in_descendant_score_index() -> anyhow::Result<()> {
                 flags,
                 locktime,
             )
-        })
-        .collect::<Result<Vec<_>, _>>()?;
+            .await?,
+        )
+    }
     let ids = txs.iter().map(|tx| tx.get_id()).collect::<Vec<_>>();
 
     for tx in txs {

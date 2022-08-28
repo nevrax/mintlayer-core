@@ -104,7 +104,7 @@ pub trait MempoolInterface: Send {
 
     // Add/remove transactions to/from the mempool according to a new tip
     #[cfg(test)]
-    fn new_tip_set(&mut self, chain_state: Box<dyn ChainstateInterface>);
+    fn new_tip_set(&mut self, chainstate_handle: subsystem::Handle<Box<dyn ChainstateInterface>>);
 }
 
 pub trait ChainState: Debug {
@@ -733,7 +733,7 @@ where
     M: GetMemoryUsage + Send + std::marker::Sync,
 {
     #[cfg(test)]
-    fn new_tip_set(&mut self, chainstate_handle: Box<dyn ChainstateInterface>) {
+    fn new_tip_set(&mut self, chainstate_handle: subsystem::Handle<Box<dyn ChainstateInterface>>) {
         self.chainstate_handle = chainstate_handle;
         let mut rolling_fee_rate = self.rolling_fee_rate.write();
         (*rolling_fee_rate).block_since_last_rolling_fee_bump = true;
