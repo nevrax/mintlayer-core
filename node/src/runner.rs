@@ -72,6 +72,7 @@ pub async fn initialize(
     let mempool = manager.add_subsystem(
         "mempool",
         mempool::make_mempool(
+            Arc::clone(&chain_config),
             chainstate.clone(),
             mempool::pool::SystemClock {},
             mempool::pool::SystemUsageEstimator {},

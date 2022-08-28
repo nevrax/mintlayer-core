@@ -15,10 +15,12 @@
 
 use std::collections::BTreeSet;
 use std::fmt::Debug;
+use std::sync::Arc;
 use std::time::Duration;
 
 use chainstate::chainstate_interface::ChainstateInterface;
 use common::chain::tokens::OutputValue;
+use common::chain::ChainConfig;
 use parking_lot::RwLock;
 use serialization::Encode;
 
@@ -180,6 +182,8 @@ pub struct Mempool<
     T: GetTime + 'static + Send,
     M: GetMemoryUsage + 'static + Send + std::marker::Sync,
 > {
+    #[allow(unused)]
+    chain_config: Arc<ChainConfig>,
     store: MempoolStore,
     rolling_fee_rate: RwLock<RollingFeeRate>,
     max_size: usize,
@@ -205,11 +209,13 @@ where
     M: GetMemoryUsage + Send + std::marker::Sync,
 {
     pub(crate) fn new(
+        chain_config: Arc<ChainConfig>,
         chainstate_handle: subsystem::Handle<Box<dyn ChainstateInterface>>,
         clock: T,
         memory_usage_estimator: M,
     ) -> Self {
         Self {
+            chain_config,
             store: MempoolStore::new(),
             chainstate_handle,
             max_size: MAX_MEMPOOL_SIZE_BYTES,

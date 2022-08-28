@@ -152,24 +152,6 @@ where
         self.rolling_fee_rate.read().rolling_minimum_fee_rate
     }
 }
-/*
-*
-       let mut chain_state = self.chain_state.clone();
-       chain_state.add_confirmed_tx(WithId::take(
-           self.store
-               .txs_by_id
-               .get(&tx_id.get())
-               .cloned()
-               .ok_or_else(|| {
-                   anyhow::anyhow!("process_block: tx {} not found in mempool", tx_id.get())
-               })?
-               .tx,
-       ));
-       log::debug!("Setting tip to {:?}", chain_state);
-       self.new_tip_set(chain_state);
-       self.drop_transaction(tx_id);
-       Ok(())
-* */
 
 #[derive(Debug, Clone)]
 pub(crate) struct ChainStateMock {
@@ -191,10 +173,6 @@ impl ChainStateMock {
             confirmed_txs: std::iter::once((genesis_tx.get_id().get(), genesis_tx)).collect(),
             available_outpoints: outpoints,
         }
-    }
-
-    fn confirmed_txs(&self) -> &HashMap<H256, Transaction> {
-        &self.confirmed_txs
     }
 
     fn confirmed_outpoints(&self) -> BTreeSet<OutPoint> {
@@ -551,12 +529,7 @@ fn get_relay_fee_from_tx_size(tx_size: usize) -> u128 {
 async fn add_single_tx() -> anyhow::Result<()> {
     let mut mempool = setup().await;
 
-    let genesis_tx = mempool
-        .chainstate_handle
-        .confirmed_txs()
-        .values()
-        .next()
-        .expect("genesis tx not found");
+    let genesis_tx = mempool.chain_config.genesis_block().expect("genesis tx not found");
 
     let outpoint_source_id = OutPointSourceId::Transaction(genesis_tx.get_id());
 
@@ -651,8 +624,9 @@ pub async fn start_chainstate(
 
 async fn setup() -> Mempool<SystemClock, SystemUsageEstimator> {
     let config = Arc::new(common::chain::config::create_unit_test_config());
-    let chainstate_interface = start_chainstate(config).await;
+    let chainstate_interface = start_chainstate(config.clone()).await;
     Mempool::new(
+        config,
         chainstate_interface,
         SystemClock {},
         SystemUsageEstimator {},
@@ -1461,6 +1435,7 @@ async fn only_expired_entries_removed() -> anyhow::Result<()> {
     let chainstate_interface = start_chainstate(config).await;
 
     let mut mempool = Mempool::new(
+        config,
         chainstate_interface,
         mock_clock.clone(),
         SystemUsageEstimator {},
@@ -1543,9 +1518,9 @@ async fn rolling_fee() -> anyhow::Result<()> {
 
     let chain_state = ChainStateMock::new();
     let config = Arc::new(common::chain::config::create_unit_test_config());
-    let chainstate_interface = start_chainstate(config).await;
+    let chainstate_interface = start_chainstate(config.clone()).await;
 
-    let mut mempool = Mempool::new(chainstate_interface, mock_clock.clone(), mock_usage);
+    let mut mempool = Mempool::new(config, chainstate_interface, mock_clock.clone(), mock_usage);
 
     let num_inputs = 1;
     let num_outputs = 3;
@@ -1893,6 +1868,7 @@ async fn descendant_of_expired_entry() -> anyhow::Result<()> {
     let chainstate_interface = start_chainstate(config).await;
 
     let mut mempool = Mempool::new(
+        config,
         chainstate_interface,
         mock_clock.clone(),
         SystemUsageEstimator {},
@@ -1954,7 +1930,7 @@ async fn mempool_full() -> anyhow::Result<()> {
     let config = Arc::new(common::chain::config::create_unit_test_config());
     let chainstate_interface = start_chainstate(config).await;
 
-    let mut mempool = Mempool::new(chainstate_interface, SystemClock, mock_usage);
+    let mut mempool = Mempool::new(config, chainstate_interface, SystemClock, mock_usage);
 
     let tx = TxGenerator::new().generate_tx(&mempool).await?;
     log::debug!("mempool_full: tx has is {}", tx.get_id().get());

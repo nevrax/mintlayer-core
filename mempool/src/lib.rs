@@ -15,7 +15,10 @@
 
 #![deny(clippy::clone_on_ref_ptr)]
 
+use std::sync::Arc;
+
 use chainstate::chainstate_interface::ChainstateInterface;
+use common::chain::ChainConfig;
 use pool::MempoolInterface;
 
 use crate::config::GetMemoryUsage;
@@ -36,6 +39,7 @@ type MempoolHandle = subsystem::Handle<Box<dyn MempoolInterface>>;
 pub type Result<T> = core::result::Result<T, MempoolError>;
 
 pub fn make_mempool<T, M>(
+    chain_config: Arc<ChainConfig>,
     chainstate_handle: subsystem::Handle<Box<dyn ChainstateInterface>>,
     time_getter: T,
     memory_usage_estimator: M,
@@ -45,6 +49,7 @@ where
     M: GetMemoryUsage + 'static + Send + std::marker::Sync,
 {
     Ok(Box::new(Mempool::new(
+        chain_config,
         chainstate_handle,
         time_getter,
         memory_usage_estimator,
