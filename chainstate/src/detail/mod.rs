@@ -427,4 +427,4 @@ impl<S: BlockchainStorage> Chainstate<S> {
 }
 
 #[cfg(test)]
-pub(crate) mod tests;
+mod tests;

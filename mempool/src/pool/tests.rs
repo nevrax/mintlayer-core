@@ -1,5 +1,3 @@
-// Copyright (c) 2022 RBB S.r.l
-// opensource@mintlayer.org
 // SPDX-License-Identifier: MIT
 // Licensed under the MIT License;
 // you may not use this file except in compliance with the License.
@@ -124,6 +122,7 @@ where
         Ok(available)
     }
 
+    /*
     async fn get_input_value(&self, input: &TxInput) -> anyhow::Result<Amount> {
         let allow_double_spend = true;
         let outpoint = self
@@ -138,6 +137,7 @@ where
             .await
             .expect("call success"))
     }
+    */
 
     fn get_minimum_rolling_fee(&self) -> FeeRate {
         self.rolling_fee_rate.read().rolling_minimum_fee_rate
@@ -151,6 +151,7 @@ mempool.add_transaction(tx1)?;
 let tx2 = TxGenerator::new(&mempool).generate_tx()?;
 mempool.add_transaction(tx2)?;
 */
+
 struct TxGenerator {
     coin_pool: BTreeSet<ValuedOutPoint>,
     num_inputs: usize,
@@ -199,6 +200,8 @@ impl TxGenerator {
         &mut self,
         mempool: &Mempool<T, M>,
     ) -> anyhow::Result<Transaction> {
+        // TODO How to generate a tx?
+        // TODO iterate over ALL outpoints, confirmed, and unconfirmed
         for outpoint in mempool.available_outpoints(self.allow_double_spend).await? {
             self.coin_pool.insert(ValuedOutPoint {
                 outpoint: outpoint.clone(),
@@ -778,8 +781,14 @@ async fn tx_spend_several_inputs<
     locktime: u32,
 ) -> anyhow::Result<Transaction> {
     let mut input_values = Vec::new();
-    for input in inputs {
-        input_values.push(mempool.get_input_value(input).await?)
+    let inputs = inputs.to_owned();
+    for input in inputs.clone() {
+        input_values.push(
+            mempool
+                .chainstate_handle
+                .call(move |this| this.get_outpoint_value(input.outpoint()))
+                .await??,
+        )
     }
     let input_value = input_values.into_iter().sum::<Option<_>>().ok_or_else(|| {
         let msg = String::from("tx_spend_input: overflow");
@@ -804,7 +813,7 @@ async fn tx_spend_several_inputs<
 
     Transaction::new(
         flags,
-        inputs.to_owned(),
+        inputs.clone(),
         vec![
             TxOutput::new(
                 OutputValue::Coin(spent),
