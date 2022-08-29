@@ -15,6 +15,7 @@
 
 use super::*;
 use chainstate::make_chainstate;
+use chainstate::BlockSource;
 use chainstate::ChainstateConfig;
 use common::chain::block::timestamp::BlockTimestamp;
 use common::chain::block::BlockReward;
@@ -25,8 +26,11 @@ use common::chain::transaction::{Destination, TxInput, TxOutput};
 use common::chain::OutPointSourceId;
 use common::chain::OutputPurpose;
 use common::primitives::H256;
+use common::{
+    chain::{block::Block, Transaction},
+    primitives::Id,
+};
 use core::panic;
-use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
@@ -137,133 +141,6 @@ where
 
     fn get_minimum_rolling_fee(&self) -> FeeRate {
         self.rolling_fee_rate.read().rolling_minimum_fee_rate
-    }
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct ChainStateMock {
-    confirmed_txs: HashMap<H256, Transaction>,
-    available_outpoints: BTreeSet<OutPoint>,
-}
-
-use chainstate::PropertyQueryError;
-use chainstate::{BlockSource, ChainstateError, ChainstateEvent, Locator};
-use common::{
-    chain::{
-        block::{Block, BlockHeader, GenBlock},
-        Transaction,
-    },
-    primitives::{BlockHeight, Id},
-};
-impl ChainstateInterface for ChainStateMock {
-    fn subscribe_to_events(&mut self, _handler: Arc<dyn Fn(ChainstateEvent) + Send + Sync>) {
-        unimplemented!()
-    }
-    fn process_block(
-        &mut self,
-        _block: Block,
-        _source: BlockSource,
-    ) -> Result<(), ChainstateError> {
-        unimplemented!()
-    }
-    fn preliminary_block_check(&self, _block: Block) -> Result<Block, ChainstateError> {
-        unimplemented!()
-    }
-    fn get_best_block_id(&self) -> Result<Id<GenBlock>, ChainstateError> {
-        unimplemented!()
-    }
-    fn is_block_in_main_chain(&self, _block_id: &Id<Block>) -> Result<bool, ChainstateError> {
-        unimplemented!()
-    }
-    fn get_block_height_in_main_chain(
-        &self,
-        _block_id: &Id<GenBlock>,
-    ) -> Result<Option<BlockHeight>, ChainstateError> {
-        unimplemented!()
-    }
-    fn get_best_block_height(&self) -> Result<BlockHeight, ChainstateError> {
-        unimplemented!()
-    }
-    fn get_block_id_from_height(
-        &self,
-        _height: &BlockHeight,
-    ) -> Result<Option<Id<GenBlock>>, ChainstateError> {
-        unimplemented!()
-    }
-    fn get_block(&self, _block_id: Id<Block>) -> Result<Option<Block>, ChainstateError> {
-        unimplemented!()
-    }
-
-    /// Returns a list of block headers whose heights distances increase exponentially starting
-    /// from the current tip.
-    ///
-    /// This returns a relatively short sequence even for a long chain. Such sequence can be used
-    /// to quickly find a common ancestor between different chains.
-    fn get_locator(&self) -> Result<Locator, ChainstateError> {
-        unimplemented!()
-    }
-
-    /// Returns a list of block headers starting from the last locator's block that is in the main
-    /// chain.
-    ///
-    /// The number of returned headers is limited by the `HEADER_LIMIT` constant. The genesis block
-    /// header is returned in case there is no common ancestor with a better block height.
-    fn get_headers(&self, _locator: Locator) -> Result<Vec<BlockHeader>, ChainstateError> {
-        unimplemented!()
-    }
-
-    /// Removes all headers that are already known to the chain from the given vector.
-    fn filter_already_existing_blocks(
-        &self,
-        _headers: Vec<BlockHeader>,
-    ) -> Result<Vec<BlockHeader>, ChainstateError> {
-        unimplemented!()
-    }
-
-    fn available_inputs(&self, tx: &Transaction) -> Result<Vec<TxInput>, ChainstateError> {
-        Ok(tx
-            .inputs()
-            .iter()
-            .filter(|input| self.available_outpoints.contains(input.outpoint()))
-            .cloned()
-            .collect())
-    }
-
-    fn get_outpoint_value(
-        &self,
-        outpoint: &OutPoint,
-    ) -> Result<Amount, chainstate::ChainstateError> {
-        self.confirmed_txs
-            .get(&outpoint.tx_id().get_tx_id().expect("Not coinbase").get())
-            .ok_or(chainstate::ChainstateError::FailedToReadProperty(
-                PropertyQueryError::TxNotFound,
-            ))
-            .and_then(|tx| {
-                tx.outputs()
-                    .get(outpoint.output_index() as usize)
-                    .ok_or(chainstate::ChainstateError::FailedToReadProperty(
-                        PropertyQueryError::OutpointNotFound,
-                    ))
-                    .map(|output| match output.value() {
-                        OutputValue::Coin(coin) => *coin,
-                    })
-            })
-    }
-
-    fn confirmed_outpoints(&self) -> Result<BTreeSet<OutPoint>, ChainstateError> {
-        Ok(self
-            .available_outpoints
-            .iter()
-            .map(|outpoint| {
-                let tx_id = outpoint
-                    .tx_id()
-                    .get_tx_id()
-                    .cloned()
-                    .expect("Outpoints in these tests are created from TXs");
-                let index = outpoint.output_index();
-                make_outpoint(&tx_id, index)
-            })
-            .collect())
     }
 }
 
