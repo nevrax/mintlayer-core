@@ -16,8 +16,9 @@
 use std::collections::BTreeSet;
 
 use chainstate_storage::BlockchainStorage;
-use chainstate_storage::BlockchainStorageRead;
+use chainstate_types::PropertyQueryError;
 use common::chain::OutPoint;
+use common::chain::OutputSpentState;
 use common::chain::Transaction;
 use common::chain::TxInput;
 use common::primitives::Amount;
@@ -132,7 +133,17 @@ impl<S: BlockchainStorage> ChainstateInterface for ChainstateInterfaceImpl<S> {
                 .chainstate
                 .get_mainchain_tx_index(&input.outpoint().tx_id())
                 .map_err(ChainstateError::FailedToReadProperty)?;
-            if let Some(index) = index {}
+            if let Some(index) = index {
+                if OutputSpentState::Unspent
+                    == index.get_spent_state(input.outpoint().output_index()).map_err(|_| {
+                        ChainstateError::FailedToReadProperty(
+                            PropertyQueryError::OutpointIndexOutOfRange,
+                        )
+                    })?
+                {
+                    available_inputs.push(input.clone())
+                }
+            }
         }
         Ok(available_inputs)
     }

@@ -298,7 +298,7 @@ where
         let chainstate_inputs = self
             .chainstate_handle
             .call(move |this| this.available_inputs(&tx_clone))
-            .await?;
+            .await??;
         tx.inputs()
             .iter()
             .find(|input| {

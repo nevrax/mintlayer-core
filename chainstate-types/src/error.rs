@@ -43,6 +43,8 @@ pub enum PropertyQueryError {
     },
     #[error("Outpoint not found")]
     OutpointNotFound,
+    #[error("Outpoint index out of range")]
+    OutpointIndexOutOfRange,
     #[error("Transaction not found")]
     TxNotFound,
     #[error("Genesis block has no header")]

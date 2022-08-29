@@ -220,12 +220,13 @@ impl ChainstateInterface for ChainStateMock {
         unimplemented!()
     }
 
-    fn available_inputs(&self, tx: &Transaction) -> Vec<TxInput> {
-        tx.inputs()
+    fn available_inputs(&self, tx: &Transaction) -> Result<Vec<TxInput>, ChainstateError> {
+        Ok(tx
+            .inputs()
             .iter()
             .filter(|input| self.available_outpoints.contains(input.outpoint()))
             .cloned()
-            .collect()
+            .collect())
     }
 
     fn get_outpoint_value(

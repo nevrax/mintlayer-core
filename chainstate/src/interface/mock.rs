@@ -56,7 +56,7 @@ mockall::mock! {
             &self,
             headers: Vec<BlockHeader>,
         ) -> Result<Vec<BlockHeader>, ChainstateError>;
-        fn available_inputs(&self, tx: &Transaction) -> Vec<TxInput>;
+        fn available_inputs(&self, tx: &Transaction) -> Result<Vec<TxInput>, ChainstateError>;
         fn get_outpoint_value(&self, outpoint: &common::chain::OutPoint) -> Result<common::primitives::Amount, ChainstateError>;
         fn confirmed_outpoints(&self) -> Result<BTreeSet<OutPoint>, ChainstateError>;
     }
