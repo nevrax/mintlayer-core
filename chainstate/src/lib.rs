@@ -25,6 +25,9 @@ pub use crate::{
     detail::{ban_score, BlockError, BlockSource, Locator},
 };
 
+pub mod test_framework;
+pub use crate::test_framework::TestFramework;
+
 mod config;
 mod detail;
 

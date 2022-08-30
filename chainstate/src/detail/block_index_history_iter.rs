@@ -65,7 +65,7 @@ impl<'a, H: BlockIndexHandle> Iterator for BlockIndexHistoryIterator<'a, H> {
 mod tests {
     use common::primitives::{Idable, H256};
 
-    use crate::{detail::tests::TestFramework, BlockSource};
+    use crate::{BlockSource, TestFramework};
 
     use super::*;
 

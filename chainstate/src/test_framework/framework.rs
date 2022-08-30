@@ -14,26 +14,20 @@
 // limitations under the License.
 
 use chainstate_storage::BlockchainStorageRead;
+use common::chain::signature::inputsig::InputWitness;
+use common::chain::TxInput;
 use common::{
-    chain::{
-        config::{Builder as ChainConfigBuilder, ChainType},
-        tokens::OutputValue,
-        Block, Destination, GenBlock, Genesis, NetUpgrades, OutputPurpose, TxOutput,
-    },
+    chain::{tokens::OutputValue, Block, Destination, GenBlock, Genesis, OutputPurpose, TxOutput},
     primitives::{id::WithId, Amount, Id, Idable},
 };
 use crypto::random::Rng;
 
-use crate::{
-    detail::{
-        tests::{
-            test_framework::{BlockBuilder, TestFrameworkBuilder, TransactionBuilder},
-            TestBlockInfo,
-        },
-        BlockIndex, GenBlockIndex, TimeGetter,
-    },
-    BlockError, BlockHeight, BlockSource, ChainstateConfig,
-};
+use crate::test_framework::{BlockBuilder, TestFrameworkBuilder};
+use crate::{BlockError, BlockHeight, BlockSource};
+use common::chain::gen_block::GenBlockId;
+
+use crate::test_framework::TestChainstate;
+use chainstate_types::{BlockIndex, GenBlockIndex};
 
 /// The `Chainstate` wrapper that simplifies operations and checks in the tests.
 pub struct TestFramework {
@@ -146,14 +140,104 @@ impl TestFramework {
     }
 }
 
+fn create_utxo_data(
+    outsrc: OutPointSourceId,
+    index: usize,
+    output: &TxOutput,
+    rng: &mut impl Rng,
+) -> Option<(TxInput, TxOutput)> {
+    Some((
+        TxInput::new(outsrc, index as u32, empty_witness(rng)),
+        match output.value() {
+            OutputValue::Coin(output_value) => {
+                let spent_value = Amount::from_atoms(rng.gen_range(0..output_value.into_atoms()));
+                let new_value = (*output_value - spent_value).unwrap();
+                utils::ensure!(new_value >= Amount::from_atoms(1));
+                TxOutput::new(
+                    OutputValue::Coin(new_value),
+                    OutputPurpose::Transfer(anyonecanspend_address()),
+                )
+            }
+        },
+    ))
+}
+
+pub fn empty_witness(rng: &mut impl Rng) -> InputWitness {
+    use crypto::random::SliceRandom;
+    let mut msg: Vec<u8> = (1..100).collect();
+    msg.shuffle(rng);
+    InputWitness::NoSignature(Some(msg))
+}
+
+pub fn anyonecanspend_address() -> Destination {
+    Destination::AnyoneCanSpend
+}
+
+pub(crate) fn create_new_outputs(
+    srcid: OutPointSourceId,
+    outs: &[TxOutput],
+    rng: &mut impl Rng,
+) -> Vec<(TxInput, TxOutput)> {
+    outs.iter()
+        .enumerate()
+        .filter_map(move |(index, output)| create_utxo_data(srcid.clone(), index, output, rng))
+        .collect()
+}
 impl Default for TestFramework {
     fn default() -> Self {
         Self::builder().build()
     }
 }
+use common::chain::OutPointSourceId;
+// TODO: Replace by a proper UTXO set abstraction
+// (https://github.com/mintlayer/mintlayer-core/issues/312).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TestBlockInfo {
+    pub(crate) txns: Vec<(OutPointSourceId, Vec<TxOutput>)>,
+    pub(crate) id: Id<GenBlock>,
+}
+
+impl TestBlockInfo {
+    pub(crate) fn from_block(blk: &Block) -> Self {
+        let txns = blk
+            .transactions()
+            .iter()
+            .map(|tx| {
+                (
+                    OutPointSourceId::Transaction(tx.get_id()),
+                    tx.outputs().clone(),
+                )
+            })
+            .collect();
+        let id = blk.get_id().into();
+        Self { txns, id }
+    }
+
+    pub(crate) fn from_genesis(genesis: &Genesis) -> Self {
+        let id: Id<GenBlock> = genesis.get_id().into();
+        let outsrc = OutPointSourceId::BlockReward(id);
+        let txns = vec![(outsrc, genesis.utxos().to_vec())];
+        Self { txns, id }
+    }
+
+    pub(crate) fn from_id(cs: &TestChainstate, id: Id<GenBlock>) -> Self {
+        match id.classify(&cs.chain_config) {
+            GenBlockId::Genesis(_) => Self::from_genesis(cs.chain_config.genesis_block()),
+            GenBlockId::Block(id) => {
+                let block = cs.chainstate_storage.get_block(id).unwrap().unwrap();
+                Self::from_block(&block)
+            }
+        }
+    }
+}
 
 #[test]
 fn build_test_framework() {
+    use crate::ChainstateConfig;
+    use crate::TimeGetter;
+    use common::chain::config::Builder as ChainConfigBuilder;
+    use common::chain::config::ChainType;
+    use common::chain::NetUpgrades;
     let chain_type = ChainType::Mainnet;
     let max_db_commit_attempts = 10;
 
@@ -180,6 +264,7 @@ fn build_test_framework() {
 
 #[test]
 fn process_block() {
+    use crate::test_framework::TransactionBuilder;
     let mut tf = TestFramework::default();
     tf.make_block_builder()
         .add_transaction(

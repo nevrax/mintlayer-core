@@ -25,6 +25,7 @@ pub type TestStore = chainstate_storage::inmemory::Store;
 pub type TestChainstate = crate::Chainstate<TestStore>;
 
 pub use self::{
-    block_builder::BlockBuilder, framework::TestFramework, framework_builder::TestFrameworkBuilder,
+    block_builder::BlockBuilder, framework::anyonecanspend_address, framework::empty_witness,
+    framework::TestBlockInfo, framework::TestFramework, framework_builder::TestFrameworkBuilder,
     transaction_builder::TransactionBuilder,
 };

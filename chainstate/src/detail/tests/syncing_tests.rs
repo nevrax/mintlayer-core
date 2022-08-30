@@ -15,10 +15,10 @@
 
 use std::iter;
 
-use crate::detail::tests::{
-    test_framework::{TestChainstate, TestFramework},
-    *,
-};
+use crate::detail::tests::*;
+use crate::test_framework::TestBlockInfo;
+use crate::test_framework::TestChainstate;
+use crate::TestFramework;
 
 #[test]
 fn locator_distances() {

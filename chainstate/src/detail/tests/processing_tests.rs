@@ -15,6 +15,7 @@
 
 use std::{sync::atomic::Ordering, time::Duration};
 
+use crate::TestFramework;
 use chainstate_storage::BlockchainStorageRead;
 use common::{
     chain::{
@@ -29,14 +30,10 @@ use common::{
 use consensus::{BlockIndexHandle, ConsensusPoWError, ConsensusVerificationError};
 use crypto::key::{KeyKind, PrivateKey};
 
+use crate::test_framework::TestBlockInfo;
+use crate::test_framework::TestStore;
 use crate::{
-    detail::{
-        median_time::calculate_median_time_past,
-        tests::{
-            test_framework::{TestFramework, TestStore},
-            *,
-        },
-    },
+    detail::{median_time::calculate_median_time_past, tests::*},
     make_chainstate, ChainstateConfig,
 };
 

@@ -21,10 +21,12 @@ use common::chain::{
     ChainConfig, Destination, NetUpgrades,
 };
 
+use crate::test_framework::TestFramework;
+
 use crate::detail::{
-    OrphanErrorHandler,
-    {tests::test_framework::TestFramework, Chainstate, ChainstateConfig, TimeGetter},
+    OrphanErrorHandler, {Chainstate, TimeGetter},
 };
+use crate::ChainstateConfig;
 
 /// The TestFramework builder.
 pub struct TestFrameworkBuilder {
