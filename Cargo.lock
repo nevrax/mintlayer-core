@@ -2735,6 +2735,7 @@ dependencies = [
  "futures",
  "itertools",
  "jsonrpsee",
+ "lazy_static",
  "libp2p",
  "logging",
  "mempool",
