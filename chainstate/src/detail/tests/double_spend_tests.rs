@@ -13,10 +13,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::detail::{
-    tests::{test_framework::TransactionBuilder, TestFramework, *},
-    transaction_verifier::error::ConnectTransactionError,
-};
+use crate::detail::{tests::*, transaction_verifier::error::ConnectTransactionError};
+use crate::test_framework::anyonecanspend_address;
+use crate::test_framework::empty_witness;
+use crate::test_framework::TestFramework;
+use crate::test_framework::TransactionBuilder;
 use common::{
     chain::{tokens::OutputValue, OutPointSourceId, Spender, Transaction, TxInput, TxOutput},
     primitives::{Amount, Id},

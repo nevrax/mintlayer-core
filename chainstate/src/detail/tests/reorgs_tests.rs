@@ -18,10 +18,8 @@ use std::sync::Mutex;
 use chainstate_storage::BlockchainStorageRead;
 use common::chain::OutputSpentState;
 
-use crate::detail::{
-    tests::{test_framework::TestFramework, *},
-    transaction_verifier::error::ConnectTransactionError,
-};
+use crate::detail::{tests::*, transaction_verifier::error::ConnectTransactionError};
+use crate::TestFramework;
 
 // Produce `genesis -> a` chain, then a parallel `genesis -> b -> c` that should trigger a reorg.
 #[rstest]

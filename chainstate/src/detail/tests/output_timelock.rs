@@ -17,13 +17,12 @@ use common::{
     primitives::{time, Amount, BlockDistance, BlockHeight, Id, Idable},
 };
 
+use crate::test_framework::anyonecanspend_address;
+use crate::test_framework::TransactionBuilder;
+use crate::TestFramework;
 use crate::{
     detail::{
         median_time::calculate_median_time_past,
-        tests::{
-            anyonecanspend_address,
-            test_framework::{TestFramework, TransactionBuilder},
-        },
         transaction_verifier::error::ConnectTransactionError,
     },
     BlockError, TimeGetter,

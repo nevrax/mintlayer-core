@@ -17,6 +17,7 @@ pub mod ban_score;
 pub mod time_getter;
 
 pub use self::error::*;
+pub use self::time_getter::TimeGetter;
 pub use chainstate_types::Locator;
 
 mod block_index_history_iter;
@@ -44,10 +45,7 @@ use logging::log;
 use utils::eventhandler::{EventHandler, EventsController};
 use utxo::UtxosDBMut;
 
-use self::{
-    orphan_blocks::{OrphanBlocksRef, OrphanBlocksRefMut},
-    time_getter::TimeGetter,
-};
+use self::orphan_blocks::{OrphanBlocksRef, OrphanBlocksRefMut};
 use crate::{detail::orphan_blocks::OrphanBlocksPool, ChainstateConfig, ChainstateEvent};
 
 type TxRw<'a, S> = <S as Transactional<'a>>::TransactionRw;
@@ -60,9 +58,9 @@ pub type OrphanErrorHandler = dyn Fn(&BlockError) + Send + Sync;
 
 #[must_use]
 pub struct Chainstate<S> {
-    chain_config: Arc<ChainConfig>,
-    chainstate_config: ChainstateConfig,
-    chainstate_storage: S,
+    pub(crate) chain_config: Arc<ChainConfig>,
+    pub(crate) chainstate_config: ChainstateConfig,
+    pub(crate) chainstate_storage: S,
     orphan_blocks: OrphanBlocksPool,
     custom_orphan_error_hook: Option<Arc<OrphanErrorHandler>>,
     events_controller: EventsController<ChainstateEvent>,
@@ -94,7 +92,9 @@ impl<S: BlockchainStorage> Chainstate<S> {
     }
 
     #[must_use]
-    fn make_db_tx_ro(&self) -> chainstateref::ChainstateRef<TxRo<'_, S>, OrphanBlocksRef> {
+    pub(crate) fn make_db_tx_ro(
+        &self,
+    ) -> chainstateref::ChainstateRef<TxRo<'_, S>, OrphanBlocksRef> {
         let db_tx = self.chainstate_storage.transaction_ro();
         chainstateref::ChainstateRef::new_ro(
             &self.chain_config,
@@ -138,7 +138,7 @@ impl<S: BlockchainStorage> Chainstate<S> {
         Ok(chainstate)
     }
 
-    fn new_no_genesis(
+    pub(crate) fn new_no_genesis(
         chain_config: Arc<ChainConfig>,
         chainstate_config: ChainstateConfig,
         chainstate_storage: S,

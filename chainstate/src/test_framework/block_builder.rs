@@ -23,13 +23,11 @@ use common::{
 };
 use crypto::random::Rng;
 
-use crate::{
-    detail::{
-        tests::{create_new_outputs, test_framework::TestFramework, TestBlockInfo},
-        BlockIndex,
-    },
-    Block, BlockError, BlockSource, GenBlock,
-};
+use crate::test_framework::framework::create_new_outputs;
+use crate::test_framework::framework::TestBlockInfo;
+use crate::test_framework::TestFramework;
+use crate::{Block, BlockError, BlockSource, GenBlock};
+use chainstate_types::BlockIndex;
 
 /// The block builder that allows construction and processing of a block.
 pub struct BlockBuilder<'f> {

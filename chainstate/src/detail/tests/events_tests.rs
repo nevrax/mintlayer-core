@@ -15,10 +15,8 @@
 
 use std::sync::Arc;
 
-use crate::detail::tests::{
-    test_framework::{TestChainstate, TestFramework},
-    *,
-};
+use crate::detail::tests::*;
+use crate::test_framework::{TestChainstate, TestFramework};
 
 type ErrorList = Arc<Mutex<Vec<BlockError>>>;
 

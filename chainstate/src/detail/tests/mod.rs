@@ -13,24 +13,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub use self::test_framework::TestFramework;
-
 use std::sync::Mutex;
 
 use crate::detail::*;
+use crate::test_framework::TestFramework;
 use common::{
     chain::{
         block::{timestamp::BlockTimestamp, ConsensusData},
         config::create_regtest,
         signature::inputsig::InputWitness,
-        tokens::OutputValue,
-        Block, Destination, GenBlock, GenBlockId, Genesis, OutPointSourceId, OutputPurpose,
-        Transaction, TxInput, TxOutput,
+        Block, Destination, GenBlock, Genesis, OutPointSourceId, OutputPurpose, Transaction,
+        TxOutput,
     },
     primitives::{Amount, BlockHeight, Id},
     Uint256,
 };
-use crypto::random::{Rng, SliceRandom};
+use crypto::random::Rng;
 use rstest::rstest;
 use serialization::Encode;
 use test_utils::random::{make_seedable_rng, Seed};
@@ -42,95 +40,8 @@ mod processing_tests;
 mod reorgs_tests;
 mod signature_tests;
 mod syncing_tests;
-mod test_framework;
 
 type EventList = Arc<Mutex<Vec<(Id<Block>, BlockHeight)>>>;
-
-fn empty_witness(rng: &mut impl Rng) -> InputWitness {
-    let mut msg: Vec<u8> = (1..100).collect();
-    msg.shuffle(rng);
-    InputWitness::NoSignature(Some(msg))
-}
-
-fn anyonecanspend_address() -> Destination {
-    Destination::AnyoneCanSpend
-}
-
-fn create_utxo_data(
-    outsrc: OutPointSourceId,
-    index: usize,
-    output: &TxOutput,
-    rng: &mut impl Rng,
-) -> Option<(TxInput, TxOutput)> {
-    Some((
-        TxInput::new(outsrc, index as u32, empty_witness(rng)),
-        match output.value() {
-            OutputValue::Coin(output_value) => {
-                let spent_value = Amount::from_atoms(rng.gen_range(0..output_value.into_atoms()));
-                let new_value = (*output_value - spent_value).unwrap();
-                utils::ensure!(new_value >= Amount::from_atoms(1));
-                TxOutput::new(
-                    OutputValue::Coin(new_value),
-                    OutputPurpose::Transfer(anyonecanspend_address()),
-                )
-            }
-        },
-    ))
-}
-
-// TODO: Replace by a proper UTXO set abstraction
-// (https://github.com/mintlayer/mintlayer-core/issues/312).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TestBlockInfo {
-    pub(crate) txns: Vec<(OutPointSourceId, Vec<TxOutput>)>,
-    pub(crate) id: Id<GenBlock>,
-}
-
-impl TestBlockInfo {
-    fn from_block(blk: &Block) -> Self {
-        let txns = blk
-            .transactions()
-            .iter()
-            .map(|tx| {
-                (
-                    OutPointSourceId::Transaction(tx.get_id()),
-                    tx.outputs().clone(),
-                )
-            })
-            .collect();
-        let id = blk.get_id().into();
-        Self { txns, id }
-    }
-
-    fn from_genesis(genesis: &Genesis) -> Self {
-        let id: Id<GenBlock> = genesis.get_id().into();
-        let outsrc = OutPointSourceId::BlockReward(id);
-        let txns = vec![(outsrc, genesis.utxos().to_vec())];
-        Self { txns, id }
-    }
-
-    fn from_id(cs: &test_framework::TestChainstate, id: Id<GenBlock>) -> Self {
-        use chainstate_storage::BlockchainStorageRead;
-        match id.classify(&cs.chain_config) {
-            GenBlockId::Genesis(_) => Self::from_genesis(cs.chain_config.genesis_block()),
-            GenBlockId::Block(id) => {
-                let block = cs.chainstate_storage.get_block(id).unwrap().unwrap();
-                Self::from_block(&block)
-            }
-        }
-    }
-}
-
-fn create_new_outputs(
-    srcid: OutPointSourceId,
-    outs: &[TxOutput],
-    rng: &mut impl Rng,
-) -> Vec<(TxInput, TxOutput)> {
-    outs.iter()
-        .enumerate()
-        .filter_map(move |(index, output)| create_utxo_data(srcid.clone(), index, output, rng))
-        .collect()
-}
 
 // Generate 5 regtest blocks and print their hex encoding, which is useful for functional tests.
 // TODO: remove when block production is ready

@@ -26,7 +26,9 @@ use common::{
 };
 use crypto::key::{KeyKind, PrivateKey};
 
-use crate::detail::tests::{test_framework::TransactionBuilder, *};
+use crate::detail::tests::*;
+use crate::test_framework::TransactionBuilder;
+use crate::TestFramework;
 
 #[test]
 fn signed_tx() {
