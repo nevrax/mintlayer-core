@@ -21,13 +21,13 @@ use common::chain::{
     ChainConfig, Destination, NetUpgrades,
 };
 
-use crate::test_framework::TestFramework;
+use crate::TestFramework;
 
-use crate::detail::{
-    OrphanErrorHandler, {Chainstate, TimeGetter},
-};
-use crate::ChainstateConfig;
+use chainstate::BlockError;
+use chainstate::ChainstateConfig;
+use common::time_getter::TimeGetter;
 
+pub type OrphanErrorHandler = dyn Fn(&BlockError) + Send + Sync;
 /// The TestFramework builder.
 pub struct TestFrameworkBuilder {
     chain_config: ChainConfig,
@@ -78,7 +78,7 @@ impl TestFrameworkBuilder {
     }
 
     pub fn build(self) -> TestFramework {
-        let chainstate = Chainstate::new(
+        let chainstate = chainstate::make_chainstate(
             Arc::new(self.chain_config),
             self.chainstate_config,
             self.chainstate_storage,
@@ -86,21 +86,6 @@ impl TestFrameworkBuilder {
             self.time_getter,
         )
         .unwrap();
-
-        TestFramework {
-            chainstate,
-            block_indexes: Vec::new(),
-        }
-    }
-
-    pub fn build_no_genesis(self) -> TestFramework {
-        let chainstate = Chainstate::new_no_genesis(
-            Arc::new(self.chain_config),
-            self.chainstate_config,
-            self.chainstate_storage,
-            self.custom_orphan_error_hook,
-            self.time_getter,
-        );
 
         TestFramework {
             chainstate,

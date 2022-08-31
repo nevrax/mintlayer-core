@@ -63,9 +63,10 @@ impl<'a, H: BlockIndexHandle> Iterator for BlockIndexHistoryIterator<'a, H> {
 
 #[cfg(test)]
 mod tests {
+    use chainstate_test_framework::TestFramework;
     use common::primitives::{Idable, H256};
 
-    use crate::{BlockSource, TestFramework};
+    use crate::BlockSource;
 
     use super::*;
 

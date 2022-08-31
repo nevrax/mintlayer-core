@@ -23,11 +23,13 @@ use common::{
 };
 use crypto::random::Rng;
 
-use crate::test_framework::framework::create_new_outputs;
-use crate::test_framework::framework::TestBlockInfo;
-use crate::test_framework::TestFramework;
-use crate::{Block, BlockError, BlockSource, GenBlock};
+use crate::framework::create_new_outputs;
+use crate::framework::TestBlockInfo;
+use crate::TestFramework;
+use chainstate::{ChainstateError, BlockSource};
 use chainstate_types::BlockIndex;
+use common::chain::Block;
+use common::chain::GenBlock;
 
 /// The block builder that allows construction and processing of a block.
 pub struct BlockBuilder<'f> {
@@ -162,7 +164,7 @@ impl<'f> BlockBuilder<'f> {
     }
 
     /// Constructs a block and processes it by the chainstate.
-    pub fn build_and_process(self) -> Result<Option<BlockIndex>, BlockError> {
+    pub fn build_and_process(self) -> Result<Option<BlockIndex>, ChainstateError> {
         let block = Block::new(
             self.transactions,
             self.prev_block_hash,

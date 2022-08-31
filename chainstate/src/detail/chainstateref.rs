@@ -17,6 +17,7 @@ use std::{collections::BTreeSet, sync::Arc};
 
 use chainstate_storage::{BlockchainStorageRead, BlockchainStorageWrite, TransactionRw};
 use chainstate_types::{get_skip_height, BlockIndex, GenBlockIndex, PropertyQueryError};
+use common::time_getter::TimeGetterFn;
 use common::{
     chain::{
         block::{
@@ -31,7 +32,7 @@ use consensus::{BlockIndexHandle, TransactionIndexHandle};
 use logging::log;
 use utils::ensure;
 
-use super::{median_time::calculate_median_time_past, time_getter::TimeGetterFn};
+use super::median_time::calculate_median_time_past;
 use crate::{BlockError, BlockSource, ChainstateConfig};
 
 use super::{

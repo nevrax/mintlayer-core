@@ -13,6 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use chainstate::ChainstateError;
 use chainstate_storage::BlockchainStorageRead;
 use common::chain::signature::inputsig::InputWitness;
 use common::chain::TxInput;
@@ -22,11 +23,12 @@ use common::{
 };
 use crypto::random::Rng;
 
-use crate::test_framework::{BlockBuilder, TestFrameworkBuilder};
-use crate::{BlockError, BlockHeight, BlockSource};
+use crate::{BlockBuilder, TestFrameworkBuilder};
+use chainstate::{BlockError, BlockSource};
 use common::chain::gen_block::GenBlockId;
+use common::primitives::BlockHeight;
 
-use crate::test_framework::TestChainstate;
+use crate::TestChainstate;
 use chainstate_types::{BlockIndex, GenBlockIndex};
 
 /// The `Chainstate` wrapper that simplifies operations and checks in the tests.
@@ -36,6 +38,14 @@ pub struct TestFramework {
 }
 
 impl TestFramework {
+    /// Creates a new test framework
+    pub fn new(chainstate: TestChainstate, block_indexes: Vec<BlockIndex>) -> Self {
+        Self {
+            chainstate,
+            block_indexes,
+        }
+    }
+
     /// Creates a new test framework instance using a builder api.
     pub fn builder() -> TestFrameworkBuilder {
         TestFrameworkBuilder::new()
@@ -51,7 +61,7 @@ impl TestFramework {
         &mut self,
         block: Block,
         source: BlockSource,
-    ) -> Result<Option<BlockIndex>, BlockError> {
+    ) -> Result<Option<BlockIndex>, ChainstateError> {
         let id = block.get_id();
         let index = self.chainstate.process_block(block, source)?;
         self.block_indexes.push(index.clone().unwrap_or_else(|| {
@@ -233,11 +243,11 @@ impl TestBlockInfo {
 
 #[test]
 fn build_test_framework() {
-    use crate::ChainstateConfig;
-    use crate::TimeGetter;
+    use chainstate::ChainstateConfig;
     use common::chain::config::Builder as ChainConfigBuilder;
     use common::chain::config::ChainType;
     use common::chain::NetUpgrades;
+    use common::time_getter::TimeGetter;
     let chain_type = ChainType::Mainnet;
     let max_db_commit_attempts = 10;
 
@@ -264,7 +274,7 @@ fn build_test_framework() {
 
 #[test]
 fn process_block() {
-    use crate::test_framework::TransactionBuilder;
+    use crate::TransactionBuilder;
     let mut tf = TestFramework::default();
     tf.make_block_builder()
         .add_transaction(

@@ -40,7 +40,7 @@ use crate::{
 #[test]
 fn process_genesis_block() {
     utils::concurrency::model(|| {
-        let mut tf = TestFramework::builder().build_no_genesis();
+        let mut tf = TestFramework::build_no_genesis();
         let genesis_id = tf.genesis().get_id();
 
         tf.chainstate.process_genesis().unwrap();
@@ -113,7 +113,13 @@ fn orphans_chains(#[case] seed: Seed) {
 #[should_panic(expected = "Best block ID not initialized")]
 fn empty_chainstate_no_genesis() {
     utils::concurrency::model(|| {
-        let tf = TestFramework::builder().build_no_genesis();
+        let tf = TestFramework::new(Chainstate::new_no_genesis(
+            chain_config,
+            chainstate_config,
+            chainstate_storage,
+            custom_orphan_error_hook,
+            time_getter,
+        ));
         // This panics
         let _ = tf.chainstate.get_best_block_id();
     })

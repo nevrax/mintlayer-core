@@ -560,6 +560,7 @@ dependencies = [
  "async-trait",
  "chainstate-storage",
  "chainstate-types",
+ "chainstate_test_framework",
  "common",
  "consensus",
  "crypto",
@@ -610,6 +611,18 @@ dependencies = [
  "serialization",
  "storage",
  "thiserror",
+]
+
+[[package]]
+name = "chainstate_test_framework"
+version = "0.1.0"
+dependencies = [
+ "chainstate",
+ "chainstate-storage",
+ "chainstate-types",
+ "common",
+ "crypto",
+ "utils",
 ]
 
 [[package]]

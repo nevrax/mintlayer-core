@@ -25,9 +25,6 @@ pub use crate::{
     detail::{ban_score, BlockError, BlockSource, Locator},
 };
 
-pub mod test_framework;
-pub use crate::test_framework::TestFramework;
-
 mod config;
 mod detail;
 
@@ -41,7 +38,8 @@ use common::{
 
 use chainstate_interface::ChainstateInterface;
 use chainstate_interface_impl::ChainstateInterfaceImpl;
-use detail::{time_getter::TimeGetter, Chainstate};
+use common::time_getter::TimeGetter;
+use detail::Chainstate;
 
 #[derive(Debug, Clone)]
 pub enum ChainstateEvent {

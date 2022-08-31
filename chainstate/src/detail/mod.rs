@@ -14,11 +14,10 @@
 // limitations under the License.
 
 pub mod ban_score;
-pub mod time_getter;
 
 pub use self::error::*;
-pub use self::time_getter::TimeGetter;
 pub use chainstate_types::Locator;
+pub use common::time_getter::TimeGetter;
 
 mod block_index_history_iter;
 mod chainstateref;
