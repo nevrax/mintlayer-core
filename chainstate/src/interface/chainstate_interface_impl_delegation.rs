@@ -18,8 +18,9 @@ use std::{
     sync::Arc,
 };
 
-use chainstate_types::BlockIndex;
+use chainstate_types::GenBlockIndex;
 use chainstate_types::Locator;
+use common::chain::config::ChainConfig;
 use common::{
     chain::{Block, GenBlock},
     primitives::{BlockHeight, Id},
@@ -93,8 +94,16 @@ impl<
         self.deref().filter_already_existing_blocks(headers)
     }
 
-    fn get_block_index(&self, id: Id<Block>) -> Result<Option<BlockIndex>, ChainstateError> {
+    fn get_block_index(&self, id: &Id<GenBlock>) -> Result<Option<GenBlockIndex>, ChainstateError> {
         self.deref().get_block_index(id)
+    }
+
+    fn get_best_block_index(&self) -> Result<chainstate_types::GenBlockIndex, ChainstateError> {
+        self.deref().get_best_block_index()
+    }
+
+    fn get_chain_config(&self) -> Arc<ChainConfig> {
+        self.deref().get_chain_config()
     }
 }
 #[cfg(test)]

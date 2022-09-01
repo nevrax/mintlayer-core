@@ -15,9 +15,12 @@
 
 use std::sync::Arc;
 
-use chainstate_types::BlockIndex;
+use chainstate_types::GenBlockIndex;
 use common::{
-    chain::block::{Block, BlockHeader, GenBlock},
+    chain::{
+        block::{Block, BlockHeader, GenBlock},
+        ChainConfig,
+    },
     primitives::{BlockHeight, Id},
 };
 
@@ -60,5 +63,8 @@ pub trait ChainstateInterface: Send {
         headers: Vec<BlockHeader>,
     ) -> Result<Vec<BlockHeader>, ChainstateError>;
 
-    fn get_block_index(&self, id: Id<Block>) -> Result<Option<BlockIndex>, ChainstateError>;
+    fn get_block_index(&self, id: &Id<GenBlock>) -> Result<Option<GenBlockIndex>, ChainstateError>;
+    fn get_best_block_index(&self) -> Result<GenBlockIndex, ChainstateError>;
+
+    fn get_chain_config(&self) -> Arc<ChainConfig>;
 }

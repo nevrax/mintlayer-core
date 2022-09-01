@@ -327,9 +327,9 @@ impl<S: BlockchainStorage> Chainstate<S> {
 
     pub fn get_block_index(
         &self,
-        id: &Id<Block>,
-    ) -> Result<Option<BlockIndex>, PropertyQueryError> {
-        self.make_db_tx_ro().get_block_index(id)
+        id: &Id<GenBlock>,
+    ) -> Result<Option<GenBlockIndex>, PropertyQueryError> {
+        self.make_db_tx_ro().get_gen_block_index(id)
     }
 
     pub fn get_best_block_index(&self) -> Result<Option<GenBlockIndex>, PropertyQueryError> {
@@ -402,7 +402,7 @@ impl<S: BlockchainStorage> Chainstate<S> {
         // verify that the first block attaches to our chain
         if let Some(id) = first_block.prev_block_id().classify(config).chain_block_id() {
             utils::ensure!(
-                self.get_block_index(&id)?.is_some(),
+                self.get_block_index(&id.into())?.is_some(),
                 PropertyQueryError::BlockNotFound(id)
             );
         }
@@ -410,7 +410,9 @@ impl<S: BlockchainStorage> Chainstate<S> {
         let res = headers
             .into_iter()
             .skip_while(|header| {
-                self.get_block_index(&header.get_id()).expect("Database failure").is_some()
+                self.get_block_index(&header.get_id().into())
+                    .expect("Database failure")
+                    .is_some()
             })
             .collect::<Vec<_>>();
 

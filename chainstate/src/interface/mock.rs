@@ -54,7 +54,8 @@ mockall::mock! {
         ) -> Result<Vec<BlockHeader>, ChainstateError>;
         fn get_block_index(
             &self,
-            id: Id<Block>
+            id: &Id<Block>
         ) -> Result<Option<BlockIndex>, ChainstateError>;
+        fn get_chain_config(&self) -> Arc<ChainConfig>;
     }
 }

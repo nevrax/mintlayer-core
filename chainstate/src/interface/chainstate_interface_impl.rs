@@ -13,8 +13,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
 use chainstate_storage::BlockchainStorage;
-use chainstate_types::BlockIndex;
+use chainstate_types::GenBlockIndex;
+use common::chain::config::ChainConfig;
 use common::{
     chain::block::{Block, BlockHeader, GenBlock},
     primitives::{BlockHeight, Id},
@@ -119,9 +122,24 @@ impl<S: BlockchainStorage> ChainstateInterface for ChainstateInterfaceImpl<S> {
         Ok(best_block_index.block_height())
     }
 
-    fn get_block_index(&self, block_id: Id<Block>) -> Result<Option<BlockIndex>, ChainstateError> {
+    fn get_best_block_index(&self) -> Result<GenBlockIndex, ChainstateError> {
+        Ok(self
+            .chainstate
+            .get_best_block_index()
+            .map_err(ChainstateError::FailedToReadProperty)?
+            .expect("Best block index could not be found"))
+    }
+
+    fn get_block_index(
+        &self,
+        block_id: &Id<GenBlock>,
+    ) -> Result<Option<GenBlockIndex>, ChainstateError> {
         self.chainstate
-            .get_block_index(&block_id)
+            .get_block_index(block_id)
             .map_err(ChainstateError::FailedToReadProperty)
+    }
+
+    fn get_chain_config(&self) -> Arc<ChainConfig> {
+        Arc::clone(&self.chainstate.chain_config)
     }
 }

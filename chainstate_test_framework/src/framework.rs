@@ -19,7 +19,7 @@ use common::chain::signature::inputsig::InputWitness;
 use common::chain::TxInput;
 use common::{
     chain::{tokens::OutputValue, Block, Destination, GenBlock, Genesis, OutputPurpose, TxOutput},
-    primitives::{id::WithId, Amount, Id, Idable},
+    primitives::{Amount, Id, Idable},
 };
 use crypto::random::Rng;
 
@@ -64,9 +64,12 @@ impl TestFramework {
     ) -> Result<Option<BlockIndex>, ChainstateError> {
         let id = block.get_id();
         self.chainstate.process_block(block, source)?;
-        let index = self.chainstate.get_block_index(id).unwrap();
-        self.block_indexes.push(index.unwrap());
-        Ok(index)
+        let index = match self.chainstate.get_block_index(&id.into()).unwrap().unwrap() {
+            GenBlockIndex::Genesis(..) => panic!("we have processed a block"),
+            GenBlockIndex::Block(block_index) => block_index,
+        };
+        self.block_indexes.push(index);
+        Ok(Some(index))
     }
 
     /// Creates and processes a given amount of blocks. Returns the id of the last produced block.
@@ -108,7 +111,7 @@ impl TestFramework {
     /// Returns the best block index.
     #[track_caller]
     pub fn best_block_index(&self) -> GenBlockIndex {
-        self.chainstate.get_best_block_index().unwrap().unwrap()
+        self.chainstate.get_best_block_index().unwrap()
     }
 
     /// Return the best block identifier.
@@ -142,7 +145,7 @@ impl TestFramework {
 
     /// Returns a block index corresponding to the specified id.
     pub fn block_index(&self, id: &Id<GenBlock>) -> GenBlockIndex {
-        self.chainstate.make_db_tx_ro().get_gen_block_index(id).unwrap().unwrap()
+        self.chainstate.get_block_index(id).unwrap().unwrap()
     }
 
     pub fn index_at(&self, at: usize) -> &BlockIndex {
@@ -232,10 +235,10 @@ impl TestBlockInfo {
     }
 
     pub(crate) fn from_id(cs: &TestChainstate, id: Id<GenBlock>) -> Self {
-        match id.classify(&cs.chain_config) {
-            GenBlockId::Genesis(_) => Self::from_genesis(cs.chain_config.genesis_block()),
+        match id.classify(&cs.get_chain_config()) {
+            GenBlockId::Genesis(_) => Self::from_genesis(cs.get_chain_config().genesis_block()),
             GenBlockId::Block(id) => {
-                let block = cs.chainstate_storage.get_block(id).unwrap().unwrap();
+                let block = cs.get_block(id).unwrap().unwrap();
                 Self::from_block(&block)
             }
         }
