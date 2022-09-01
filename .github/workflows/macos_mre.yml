@@ -1,0 +1,34 @@
+name: build
+
+on:
+    push:
+      branches:
+        - master
+        - staging
+    pull_request:
+      branches:
+        - master
+        - staging
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  macos_mre:
+    runs-on: macos-latest
+    steps:
+    - uses: actions/checkout@v2
+    - name: Install rust stable
+      uses: actions-rs/toolchain@v1
+      with:
+        profile: minimal
+        toolchain: stable
+        default: true
+    - name: Checkout repository and submodules
+      uses: actions/checkout@v2
+      with:
+        submodules: recursive
+    - name: Run tests
+      run: |
+        cd p2p
+        cargo test --release sync::tests::request_response::test_multiple_requests_and_responses -- --nocapture

@@ -229,6 +229,8 @@ impl Backend {
         peer_id: &types::MockPeerId,
         request: message::Request,
     ) -> crate::Result<types::MockRequestId> {
+        // println!("try to send request to peer {peer_id}");
+
         let peer = self
             .peers
             .get_mut(peer_id)
@@ -236,10 +238,14 @@ impl Backend {
 
         let (request_id, request) = self.request_mgr.make_request(peer_id, request)?;
 
+        // println!("{request_id:?}");
+
         peer.tx
             .send(types::MockEvent::SendMessage(request))
             .await
             .map_err(P2pError::from)?;
+
+        // println!("request sent to peer object");
 
         Ok(request_id)
     }

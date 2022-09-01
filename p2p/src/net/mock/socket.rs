@@ -106,17 +106,28 @@ impl MockSocket {
     }
 
     pub async fn send(&mut self, msg: Message) -> Result<(), std::io::Error> {
+        let cpy = msg.clone();
         let mut buf = bytes::BytesMut::new();
         self.encoder.encode(msg, &mut buf)?;
+        println!("send {} bytes to remote, message {:?}", buf.len(), cpy);
         self.socket.write(&buf).await.map(|_| ())
     }
 
     pub async fn recv(&mut self) -> Result<Option<Message>, std::io::Error> {
+        println!("try to receive, buffer size {}", self.buffer.len());
+
         if self.socket.read_buf(&mut self.buffer).await? == 0 {
+            println!("read zero from socket");
             return Err(std::io::Error::from(std::io::ErrorKind::UnexpectedEof));
         }
 
-        self.decoder.decode(&mut self.buffer)
+        println!("read {} from buffer", self.buffer.len());
+
+        let res = self.decoder.decode(&mut self.buffer);
+
+        println!("buffer now {}, received {:?}", self.buffer.len(), res);
+
+        res
     }
 }
 
@@ -143,5 +154,42 @@ mod tests {
         peer_socket.send(msg.clone()).await.unwrap();
 
         assert_eq!(server_socket.recv().await.unwrap().unwrap(), msg);
+    }
+
+    #[tokio::test]
+    async fn send_request_twice() {
+        use std::time::Duration;
+        use tokio::time::timeout;
+
+        let addr: std::net::SocketAddr = "[::1]:0".parse().unwrap();
+        let server = TcpListener::bind(addr).await.unwrap();
+        let peer_fut = TcpStream::connect(server.local_addr().unwrap());
+
+        let (res1, res2) = tokio::join!(server.accept(), peer_fut);
+        let mut server_socket = MockSocket::new(res1.unwrap().0);
+        let mut peer_socket = MockSocket::new(res2.unwrap());
+
+        let msg = Message::Request {
+            request_id: types::MockRequestId::new(1337u64),
+            request: Request::HeaderListRequest(HeaderListRequest::new(chainstate::Locator::new(
+                vec![],
+            ))),
+        };
+        peer_socket.send(msg.clone()).await.unwrap();
+        peer_socket.send(msg.clone()).await.unwrap();
+
+        // match timeout(Duration::from_secs(15), server_socket.recv()).await {
+        //     Ok(res) => {
+        //         // println!("first request received {res:?}");
+        //         // println!("try second");
+        //         // println!("second {:?}", server_socket.recv().await);
+        //     }
+        //     Err(_err) => panic!("failed to receive first request in time"),
+        // }
+
+        // match timeout(Duration::from_secs(15), server_socket.recv()).await {
+        //     Ok(res) => println!("second request received {res:?}"),
+        //     Err(_err) => panic!("failed to receive second request in time"),
+        // }
     }
 }

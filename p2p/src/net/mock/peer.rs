@@ -196,7 +196,10 @@ impl Peer {
             tokio::select! {
                 event = self.rx.recv().fuse() => match event.ok_or(P2pError::ChannelClosed)? {
                     MockEvent::Disconnect => return self.destroy_peer().await,
-                    MockEvent::SendMessage(message) => self.socket.send(*message).await?,
+                    MockEvent::SendMessage(message) => {
+                        // println!("send message local id {}, remote id {}", self.local_peer_id, self.remote_peer_id);
+                        self.socket.send(*message).await?
+                    }
                 },
                 event = self.socket.recv() => match event {
                     Err(err) => {
@@ -205,6 +208,7 @@ impl Peer {
                     }
                     Ok(None) => {},
                     Ok(Some(message)) => {
+                        println!("read message from socket");
                         self.tx
                             .send((
                                 self.remote_peer_id,
@@ -214,6 +218,19 @@ impl Peer {
                             ))
                             .await
                             .map_err(P2pError::from)?;
+
+						// drain the socket from messages
+                        while let Ok(Some(message)) = self.socket.recv().await {
+                            self.tx
+                                .send((
+                                    self.remote_peer_id,
+                                    types::PeerEvent::MessageReceived {
+                                        message
+                                    },
+                                ))
+                                .await
+                                .map_err(P2pError::from)?;
+                        }
                     }
                 }
             }

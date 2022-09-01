@@ -287,6 +287,7 @@ where
     ) -> crate::Result<T::SyncingPeerRequestId> {
         let (tx, rx) = oneshot::channel();
 
+        // println!("send request to remote");
         self.cmd_tx
             .send(types::Command::SendRequest {
                 peer_id,

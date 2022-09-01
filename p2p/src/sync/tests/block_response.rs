@@ -41,7 +41,6 @@ async fn peer_doesnt_exist_libp2p() {
 
 // TODO: fix https://github.com/mintlayer/mintlayer-core/issues/375
 #[tokio::test]
-#[cfg(not(target_os = "macos"))]
 async fn peer_doesnt_exist_mock() {
     peer_doesnt_exist::<MockService>(make_mock_addr(), MockPeerId::random()).await;
 }
@@ -82,7 +81,6 @@ async fn valid_block_libp2p() {
 
 // TODO: fix https://github.com/mintlayer/mintlayer-core/issues/375
 #[tokio::test]
-#[cfg(not(target_os = "macos"))]
 async fn valid_block_mock() {
     valid_block::<MockService>(make_mock_addr(), MockPeerId::random()).await;
 }
@@ -117,7 +115,6 @@ async fn valid_block_invalid_state_libp2p() {
 
 // TODO: fix https://github.com/mintlayer/mintlayer-core/issues/375
 #[tokio::test]
-#[cfg(not(target_os = "macos"))]
 async fn valid_block_invalid_state_mock() {
     valid_block_invalid_state::<MockService>(make_mock_addr(), MockPeerId::random()).await;
 }
@@ -162,7 +159,6 @@ async fn valid_block_resubmitted_chainstate_libp2p() {
 
 // TODO: fix https://github.com/mintlayer/mintlayer-core/issues/375
 #[tokio::test]
-#[cfg(not(target_os = "macos"))]
 async fn valid_block_resubmitted_chainstate_mock() {
     valid_block_resubmitted_chainstate::<MockService>(make_mock_addr(), MockPeerId::random()).await;
 }
@@ -209,7 +205,6 @@ async fn invalid_block_libp2p() {
 
 // TODO: fix https://github.com/mintlayer/mintlayer-core/issues/375
 #[tokio::test]
-#[cfg(not(target_os = "macos"))]
 async fn invalid_block_mock() {
     invalid_block::<MockService>(make_mock_addr(), MockPeerId::random()).await;
 }

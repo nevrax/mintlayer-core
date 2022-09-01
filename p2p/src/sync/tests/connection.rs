@@ -41,7 +41,6 @@ async fn test_peer_reconnected_libp2p() {
 
 // TODO: fix https://github.com/mintlayer/mintlayer-core/issues/375
 #[tokio::test]
-#[cfg(not(target_os = "macos"))]
 async fn test_peer_reconnected_mock() {
     test_peer_reconnected::<MockService>(make_mock_addr(), MockPeerId::random()).await;
 }
@@ -75,7 +74,6 @@ async fn test_peer_disconnected_libp2p() {
 
 // TODO: fix https://github.com/mintlayer/mintlayer-core/issues/375
 #[tokio::test]
-#[cfg(not(target_os = "macos"))]
 async fn test_peer_disconnected_mock() {
     test_peer_disconnected::<MockService>(
         make_mock_addr(),

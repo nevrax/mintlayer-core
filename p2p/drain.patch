@@ -1,0 +1,35 @@
+diff --git a/p2p/src/net/mock/peer.rs b/p2p/src/net/mock/peer.rs
+index c40c39cb..39e5d069 100644
+--- a/p2p/src/net/mock/peer.rs
++++ b/p2p/src/net/mock/peer.rs
+@@ -219,18 +219,18 @@ impl Peer {
+                             .await
+                             .map_err(P2pError::from)?;
+ 
+-						// // drain the socket from messages
+-      //                   while let Ok(Some(message)) = self.socket.recv().await {
+-      //                       self.tx
+-      //                           .send((
+-      //                               self.remote_peer_id,
+-      //                               types::PeerEvent::MessageReceived {
+-      //                                   message
+-      //                               },
+-      //                           ))
+-      //                           .await
+-      //                           .map_err(P2pError::from)?;
+-      //                   }
++						// drain the socket from messages
++                        while let Ok(Some(message)) = self.socket.recv().await {
++                            self.tx
++                                .send((
++                                    self.remote_peer_id,
++                                    types::PeerEvent::MessageReceived {
++                                        message
++                                    },
++                                ))
++                                .await
++                                .map_err(P2pError::from)?;
++                        }
+                     }
+                 }
+             }
