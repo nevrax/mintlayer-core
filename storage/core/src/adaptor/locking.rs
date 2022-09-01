@@ -31,6 +31,12 @@ use utils::sync;
 pub struct TxRo<'tx, T>(sync::RwLockReadGuard<'tx, T>);
 
 impl<'tx, T: ReadOps> ReadOps for TxRo<'tx, T> {
+    type PrefixIter = T::PrefixIter;
+
+    fn prefix_iter(&self, idx: DbIndex, prefix: &[u8]) -> crate::Result<Self::PrefixIter> {
+        self.0.prefix_iter(idx, prefix)
+    }
+
     fn get(&self, idx: DbIndex, key: &[u8]) -> crate::Result<Option<&[u8]>> {
         self.0.get(idx, key)
     }
@@ -55,6 +61,12 @@ impl<'tx, T> TxRw<'tx, T> {
 }
 
 impl<'tx, T: ReadOps> ReadOps for TxRw<'tx, T> {
+    type PrefixIter = std::iter::Empty<(Data, Data)>;
+
+    fn prefix_iter(&self, idx: DbIndex, prefix: &[u8]) -> crate::Result<Self::PrefixIter> {
+        Ok(std::iter::empty())
+    }
+
     fn get(&self, idx: DbIndex, key: &[u8]) -> crate::Result<Option<&[u8]>> {
         self.deltas[idx.get()]
             .get(key)

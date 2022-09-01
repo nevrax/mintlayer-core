@@ -21,7 +21,13 @@ pub use crate::{
 };
 
 /// Read-only database operations
-pub trait ReadOps {
+pub trait ReadOps /*: for<'m> PrefixIter<'m>*/ {
+    /// Prefix iterator type
+    type PrefixIter: Iterator<Item = (Data, Data)>;
+
+    /// Get an iterator over items with given prefix
+    fn prefix_iter(&self, idx: DbIndex, prefix: &[u8]) -> crate::Result<Self::PrefixIter>;
+
     /// Get value associated with given key.
     fn get(&self, idx: DbIndex, key: &[u8]) -> crate::Result<Option<&[u8]>>;
 }

@@ -17,11 +17,19 @@ use storage_core::{adaptor, backend, Data, DbDesc, DbIndex};
 
 use std::collections::BTreeMap;
 
+struct PrefixIter<'m>(std::collections::btree_map::Iter<'m, Data, Data>);
+
 type Map = BTreeMap<Data, Data>;
 
 pub struct StorageMaps(Vec<Map>);
 
 impl backend::ReadOps for StorageMaps {
+    type PrefixIter = PrefixIter<'m>;
+
+    fn prefix_iter(&self, idx: DbIndex, prefix: &[u8]) -> storage_core::Result<Self::PrefixIter> {
+        Ok(self.0[idx.get()].get(prefix..).take_while(|(k, _)| k.starts_with(prefix)).map(|k, v|))
+    }
+
     fn get(&self, idx: DbIndex, key: &[u8]) -> storage_core::Result<Option<&[u8]>> {
         Ok(self.0[idx.get()].get(key).map(AsRef::as_ref))
     }
