@@ -14,6 +14,7 @@
 // limitations under the License.
 
 use chainstate_storage::BlockchainStorage;
+use chainstate_types::BlockIndex;
 use common::{
     chain::block::{Block, BlockHeader, GenBlock},
     primitives::{BlockHeight, Id},
@@ -116,5 +117,11 @@ impl<S: BlockchainStorage> ChainstateInterface for ChainstateInterfaceImpl<S> {
             .map_err(ChainstateError::FailedToReadProperty)?
             .expect("Best block index could not be found");
         Ok(best_block_index.block_height())
+    }
+
+    fn get_block_index(&self, block_id: Id<Block>) -> Result<Option<BlockIndex>, ChainstateError> {
+        self.chainstate
+            .get_block_index(&block_id)
+            .map_err(ChainstateError::FailedToReadProperty)
     }
 }

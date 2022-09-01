@@ -18,6 +18,7 @@ use std::{
     sync::Arc,
 };
 
+use chainstate_types::BlockIndex;
 use chainstate_types::Locator;
 use common::{
     chain::{Block, GenBlock},
@@ -90,6 +91,10 @@ impl<
         headers: Vec<common::chain::block::BlockHeader>,
     ) -> Result<Vec<common::chain::block::BlockHeader>, ChainstateError> {
         self.deref().filter_already_existing_blocks(headers)
+    }
+
+    fn get_block_index(&self, id: Id<Block>) -> Result<Option<BlockIndex>, ChainstateError> {
+        self.deref().get_block_index(id)
     }
 }
 #[cfg(test)]

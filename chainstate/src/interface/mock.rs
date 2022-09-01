@@ -52,5 +52,9 @@ mockall::mock! {
             &self,
             headers: Vec<BlockHeader>,
         ) -> Result<Vec<BlockHeader>, ChainstateError>;
+        fn get_block_index(
+            &self,
+            id: Id<Block>
+        ) -> Result<Option<BlockIndex>, ChainstateError>;
     }
 }

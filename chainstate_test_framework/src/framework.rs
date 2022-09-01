@@ -24,7 +24,7 @@ use common::{
 use crypto::random::Rng;
 
 use crate::{BlockBuilder, TestFrameworkBuilder};
-use chainstate::{BlockError, BlockSource};
+use chainstate::BlockSource;
 use common::chain::gen_block::GenBlockId;
 use common::primitives::BlockHeight;
 
@@ -63,10 +63,9 @@ impl TestFramework {
         source: BlockSource,
     ) -> Result<Option<BlockIndex>, ChainstateError> {
         let id = block.get_id();
-        let index = self.chainstate.process_block(block, source)?;
-        self.block_indexes.push(index.clone().unwrap_or_else(|| {
-            self.chainstate.chainstate_storage.get_block_index(&id).unwrap().unwrap()
-        }));
+        self.chainstate.process_block(block, source)?;
+        let index = self.chainstate.get_block_index(id).unwrap();
+        self.block_indexes.push(index.unwrap());
         Ok(index)
     }
 
@@ -79,7 +78,7 @@ impl TestFramework {
         parent_block: &Id<GenBlock>,
         blocks: usize,
         rng: &mut impl Rng,
-    ) -> Result<Id<GenBlock>, BlockError> {
+    ) -> Result<Id<GenBlock>, ChainstateError> {
         // TODO: Instead of creating TestBlockInfo on every iteration, a proper UTXO set
         // abstraction should be used. See https://github.com/mintlayer/mintlayer-core/issues/312
         // for the details.
@@ -100,9 +99,11 @@ impl TestFramework {
     }
 
     /// Returns the genesis block of the chain.
+    /*
     pub fn genesis(&self) -> &WithId<Genesis> {
         self.chainstate.chain_config.genesis_block()
     }
+    */
 
     /// Returns the best block index.
     #[track_caller]
