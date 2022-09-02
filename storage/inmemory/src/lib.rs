@@ -17,8 +17,6 @@ use storage_core::{adaptor, backend, Data, DbDesc, DbIndex};
 
 use std::collections::BTreeMap;
 
-struct PrefixIter<'m>(std::collections::btree_map::Iter<'m, Data, Data>);
-
 type Map = BTreeMap<Data, Data>;
 
 pub struct StorageMaps(Vec<Map>);
@@ -29,19 +27,38 @@ impl backend::ReadOps for StorageMaps {
     }
 }
 
+pub struct PrefixIter<'m> {
+    inner: std::collections::btree_map::Range<'m, Data, Data>,
+    prefix: Data,
+}
+
+impl<'m> PrefixIter<'m> {
+    fn new(map: &'m Map, prefix: Data) -> Self {
+        let inner = map.range(prefix.clone()..);
+        Self { inner, prefix }
+    }
+}
+
+impl Iterator for PrefixIter<'_> {
+    type Item = (Data, Data);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.inner
+            .next()
+            .and_then(|(k, v)| k.starts_with(&self.prefix).then(|| (k.clone(), v.clone())))
+    }
+}
+
 impl<'i> backend::PrefixIter<'i> for StorageMaps {
     // TODO: Define a custom iterator type and do this without boxing
-    type Iterator = Box<dyn 'i + Iterator<Item = (Data, Data)>>;
+    type Iterator = PrefixIter<'i>;
 
     fn prefix_iter<'m: 'i>(
         &'m self,
         idx: DbIndex,
         prefix: Data,
     ) -> storage_core::Result<Self::Iterator> {
-        let iter = self.0[idx.get()]
-            .range(prefix.clone()..)
-            .map_while(move |(k, v)| k.starts_with(&prefix).then(|| (k.clone(), v.clone())));
-        Ok(Box::new(iter))
+        Ok(PrefixIter::new(&self.0[idx.get()], prefix))
     }
 }
 
