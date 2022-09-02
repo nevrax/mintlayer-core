@@ -22,7 +22,7 @@ use crate::{
     info::{DbDesc, DbIndex},
     Data,
 };
-use traits::{ReadOps, WriteOps};
+use traits::{PrefixIter, ReadOps, WriteOps};
 
 use std::collections::BTreeMap;
 use utils::sync;
@@ -33,6 +33,14 @@ pub struct TxRo<'tx, T>(sync::RwLockReadGuard<'tx, T>);
 impl<'tx, T: ReadOps> ReadOps for TxRo<'tx, T> {
     fn get(&self, idx: DbIndex, key: &[u8]) -> crate::Result<Option<&[u8]>> {
         self.0.get(idx, key)
+    }
+}
+
+impl<'tx, 'i, T: PrefixIter<'i>> PrefixIter<'i> for TxRo<'tx, T> {
+    type Iterator = T::Iterator;
+
+    fn prefix_iter<'m: 'i>(&'m self, idx: DbIndex, prefix: Data) -> crate::Result<Self::Iterator> {
+        self.0.prefix_iter(idx, prefix)
     }
 }
 
@@ -55,16 +63,18 @@ impl<'tx, T> TxRw<'tx, T> {
 }
 
 impl<'tx, T: ReadOps> ReadOps for TxRw<'tx, T> {
-    type PrefixIter = std::iter::Empty<(Data, Data)>;
-
-    fn prefix_iter(&self, idx: DbIndex, prefix: &[u8]) -> crate::Result<Self::PrefixIter> {
-        Ok(std::iter::empty())
-    }
-
     fn get(&self, idx: DbIndex, key: &[u8]) -> crate::Result<Option<&[u8]>> {
         self.deltas[idx.get()]
             .get(key)
             .map_or_else(|| self.db.get(idx, key), |x| Ok(x.as_deref()))
+    }
+}
+
+impl<'tx, 'i, T: PrefixIter<'i>> PrefixIter<'i> for TxRw<'tx, T> {
+    type Iterator = std::iter::Empty<(Data, Data)>;
+
+    fn prefix_iter<'m: 'i>(&'m self, idx: DbIndex, prefix: Data) -> crate::Result<Self::Iterator> {
+        todo!()
     }
 }
 

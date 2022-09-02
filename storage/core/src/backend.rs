@@ -23,10 +23,10 @@ pub use crate::{
 /// Types providing capability of iterating over keys with given prefix
 pub trait PrefixIter<'i> {
     /// The iterator type
-    type Iter: 'i + Iterator<Item = (Data, Data)>;
+    type Iterator: 'i + Iterator<Item = (Data, Data)>;
 
     /// Get iterator over key-value pairs where the key has given prefix
-    fn prefix_iter<'m: 'i>(&'m self, idx: DbIndex, prefix: &[u8]) -> crate::Result<Self::Iter>;
+    fn prefix_iter<'m: 'i>(&'m self, idx: DbIndex, prefix: Data) -> crate::Result<Self::Iterator>;
 }
 
 /// Read-only database operations

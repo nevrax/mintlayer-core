@@ -24,14 +24,24 @@ type Map = BTreeMap<Data, Data>;
 pub struct StorageMaps(Vec<Map>);
 
 impl backend::ReadOps for StorageMaps {
-    type PrefixIter = PrefixIter<'m>;
-
-    fn prefix_iter(&self, idx: DbIndex, prefix: &[u8]) -> storage_core::Result<Self::PrefixIter> {
-        Ok(self.0[idx.get()].get(prefix..).take_while(|(k, _)| k.starts_with(prefix)).map(|k, v|))
-    }
-
     fn get(&self, idx: DbIndex, key: &[u8]) -> storage_core::Result<Option<&[u8]>> {
         Ok(self.0[idx.get()].get(key).map(AsRef::as_ref))
+    }
+}
+
+impl<'i> backend::PrefixIter<'i> for StorageMaps {
+    // TODO: Define a custom iterator type and do this without boxing
+    type Iterator = Box<dyn 'i + Iterator<Item = (Data, Data)>>;
+
+    fn prefix_iter<'m: 'i>(
+        &'m self,
+        idx: DbIndex,
+        prefix: Data,
+    ) -> storage_core::Result<Self::Iterator> {
+        let iter = self.0[idx.get()]
+            .range(prefix.clone()..)
+            .map_while(move |(k, v)| k.starts_with(&prefix).then(|| (k.clone(), v.clone())));
+        Ok(Box::new(iter))
     }
 }
 
