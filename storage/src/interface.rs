@@ -164,6 +164,23 @@ where
                 .map(|x| x.map(Encoded::from_bytes_unchecked))
         })
     }
+
+    /// Iterator over entries with key starting with given prefix
+    // TODO: Make type safe
+    pub fn prefix_iter(
+        &self,
+        prefix: Vec<u8>,
+    ) -> crate::Result<impl '_ + Iterator<Item = (DbMap::Key, Encoded<Vec<u8>, DbMap::Value>)>>
+    {
+        let iter = backend::PrefixIter::prefix_iter(self.dbtx, self.idx, prefix)?;
+        let iter = iter.map(|(k, v)| {
+            (
+                Encoded::from_bytes_unchecked(k).decode(),
+                Encoded::from_bytes_unchecked(v),
+            )
+        });
+        Ok(iter)
+    }
 }
 
 /// Represents a mutable view of a key-value map
